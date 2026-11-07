@@ -1,0 +1,61 @@
+{
+  "title": "Vaibik USB-powered breadboard prototype",
+  "board_reference": "nice!nano v2 front view, USB at top",
+  "firmware_target": "promicro_nrf52840/nrf52840/uf2",
+  "grid": "30 rows, A-E and F-J form separate five-contact groups per row; power rails unused",
+  "parts": {
+    "TX.PTT": "C21",
+    "TX.GND": "C23",
+    "TX.CLK": "C25",
+    "TX.DAT": "C26",
+    "TX.3V3": "G24",
+    "MIC.3V": "J6",
+    "MIC.GND": "J7",
+    "MIC.SEL": "J8",
+    "MIC.CLK": "J9",
+    "MIC.DAT": "J10",
+    "SW.A1": "E13",
+    "SW.A2": "F13",
+    "SW.B1": "E15",
+    "SW.B2": "F15"
+  },
+  "jumpers": [
+    {
+      "net": "PTT",
+      "from": "A21",
+      "to": "A13"
+    },
+    {
+      "net": "GND",
+      "from": "A23",
+      "to": "G7"
+    },
+    {
+      "net": "GND",
+      "from": "H7",
+      "to": "H8"
+    },
+    {
+      "net": "GND",
+      "from": "F7",
+      "to": "J15"
+    },
+    {
+      "net": "3V3",
+      "from": "J24",
+      "to": "F6"
+    },
+    {
+      "net": "CLK",
+      "from": "A25",
+      "to": "F9"
+    },
+    {
+      "net": "DAT",
+      "from": "A26",
+      "to": "F10"
+    }
+  ],
+  "switch": "normally open; E13/F13 internally common and E15/F15 internally common in shown orientation; diagonal E13/F15 wired; press connects PTT to GND",
+  "verified": "All five expected nets separate with button released. Press connects only PTT to GND."
+}

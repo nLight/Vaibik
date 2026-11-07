@@ -1,0 +1,28 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	chosen {
+		zephyr,console = &uart0;
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+
+		ptt_input: ptt-input {
+			gpios = <&xiao_d 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		};
+	};
+
+	msm261d3526hicpm-c-en {
+		regulator-boot-on;
+	};
+};
+
+&pdm0 {
+	status = "okay";
+	clock-source = "PCLK32M_HFXO";
+};
+
+&board_cdc_acm_uart {
+	status = "disabled";
+};

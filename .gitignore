@@ -1,0 +1,15 @@
+/build/
+/.venv/
+/desktop/node_modules/
+__pycache__/
+*.wav
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+CURRENT.UF2
+settings.json

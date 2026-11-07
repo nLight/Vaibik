@@ -1,0 +1,7 @@
+&flash0 {
+	partitions {
+		/delete-node/ partition@26000;
+	};
+};
+
+#include <nordic/nrf52840_partition_uf2_sdv7.dtsi>

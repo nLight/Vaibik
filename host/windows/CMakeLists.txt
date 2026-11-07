@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.19)
+project(VibeMicDesktopDraft LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_executable(vibemic-desktop-draft desktop-draft.cpp)
+target_compile_definitions(vibemic-desktop-draft PRIVATE UNICODE _UNICODE)
+target_link_libraries(vibemic-desktop-draft PRIVATE ole32 oleaut32 uiautomationcore uuid user32)

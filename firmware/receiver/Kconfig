@@ -1,0 +1,10 @@
+mainmenu "VibeMic USB receiver"
+
+source "Kconfig.zephyr"
+
+config VIBEMIC_TEST_TONE
+	bool "Emit a 1 kHz test tone without a transmitter"
+
+config VIBEMIC_VENDOR_HID
+	bool "Send PTT state to VibeMic Desktop using vendor HID"
+	default y if BOARD_PROMICRO_NRF52840

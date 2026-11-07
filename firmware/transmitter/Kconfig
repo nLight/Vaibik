@@ -1,0 +1,6 @@
+mainmenu "VibeMic transmitter"
+
+source "Kconfig.zephyr"
+
+config VIBEMIC_MIC_PROBE
+	bool "Capture a three-second PCM clip over USB CDC ACM"

@@ -1,0 +1,4 @@
+&board_cdc_acm_uart {
+	status = "okay";
+	hw-flow-control; /* uart_poll_out waits for TX space instead of discarding bytes. */
+};

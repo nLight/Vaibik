@@ -1,0 +1,3 @@
+# VibeMic development USB ID. Grant HID access to the active local desktop user.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0003", TAG+="uaccess"
+KERNEL=="ttyACM*", SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0002", TAG+="uaccess"

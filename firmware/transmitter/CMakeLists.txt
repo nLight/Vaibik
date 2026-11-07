@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.20.0)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(vibemic_transmitter)
+target_include_directories(app PRIVATE ../common)
+target_sources(app PRIVATE src/capture.c)
+
+if(CONFIG_VIBEMIC_MIC_PROBE)
+  target_sources(app PRIVATE src/mic_probe.c)
+else()
+  target_sources(app PRIVATE src/main.c ../common/link.c ../common/protocol.c)
+endif()
