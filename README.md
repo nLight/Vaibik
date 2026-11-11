@@ -123,6 +123,12 @@ VIBEMIC_REVIEW_DIRECTORY="$PWD/build/ui-review" ./script/build_and_run.sh --fixt
 
 The fixture uses isolated sample data and exercises UI states without flashing physical boards. For acoustic checks, `tools/capture_mic.py` records WAV from PDM Probe (requires `pyserial`).
 
+### GitHub Actions
+
+Each push to `main` deploys `site/` to GitHub Pages and runs **Build Vaibik**. Download the UF2 and macOS DMG artifacts from that run. A tag matching the version in `desktop/package.json` (for example, `v0.1.35`) publishes a GitHub prerelease with both DMGs and the six dongle/transmitter UF2 images.
+
+CI uses ad hoc app signing by default. To sign tagged macOS builds with Developer ID, configure the Actions secrets `MACOS_CERTIFICATE_P12` (a base64-encoded Developer ID Application PKCS#12) and `MACOS_CERTIFICATE_PASSWORD`. Apple notarization is a separate step.
+
 ## Layout
 
 ```text

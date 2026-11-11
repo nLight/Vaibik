@@ -1,0 +1,202 @@
+name: Build Vaibik
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: vaibik-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  checks:
+    name: Test desktop and firmware logic
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Check release tag
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(node -p 'require("./desktop/package.json").version')
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag must match the version in desktop/package.json."
+            exit 1
+          fi
+      - run: npm --prefix desktop ci --ignore-scripts
+      - run: npm --prefix desktop test
+      - run: ./tools/test-host.sh
+
+  firmware:
+    name: Build nRF52840 UF2
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends device-tree-compiler ninja-build python3-venv
+      - name: Build firmware with Nordic SDK
+        run: bash script/build_ci_firmware.sh
+      - name: Check flash layouts
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { validateUF2 } = require('./desktop/src/firmware.cjs');
+          for (const role of ['rx', 'tx', 'tx-v2-battery', 'tx-probe']) {
+            for (const [suffix, address] of [['', 0x26000], ['-s140v7', 0x27000]]) {
+              const file = `build/promicro-${role}${suffix}/zephyr/zephyr.uf2`;
+              validateUF2(fs.readFileSync(file), address);
+              console.log(file);
+            }
+          }
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: firmware
+          path: build/promicro-*/zephyr/zephyr.uf2
+          if-no-files-found: error
+
+  macos:
+    name: Package macOS (${{ matrix.arch }})
+    needs: firmware
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: firmware
+          path: build
+      - run: npm --prefix desktop ci
+      - name: Create and verify DMG
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+          CERTIFICATE_P12: ${{ github.ref_type == 'tag' && secrets.MACOS_CERTIFICATE_P12 || '' }}
+          CERTIFICATE_PASSWORD: ${{ github.ref_type == 'tag' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+        run: |
+          flags=()
+          output=build/source-release/macos
+          signature='ad hoc'
+          if [[ -n "$CERTIFICATE_P12" || -n "$CERTIFICATE_PASSWORD" ]]; then
+            if [[ -z "$CERTIFICATE_P12" || -z "$CERTIFICATE_PASSWORD" ]]; then
+              echo "::error::Set both macOS signing secrets."
+              exit 1
+            fi
+            signing_dir=$(mktemp -d "$RUNNER_TEMP/vaibik-signing.XXXXXX")
+            keychain="$signing_dir/signing.keychain-db"
+            keychain_password=$(openssl rand -hex 24)
+            trap 'security delete-keychain "$keychain" 2>/dev/null || true; rm -rf -- "$signing_dir"' EXIT
+            printf '%s' "$CERTIFICATE_P12" | base64 -D -o "$signing_dir/certificate.p12"
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 3600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            security import "$signing_dir/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+            security list-keychains -d user -s "$keychain"
+            rm -f -- "$signing_dir/certificate.p12"
+            flags+=(--signed)
+            output=build/source-release/macos-signed
+            signature='Developer ID'
+          fi
+          unset CERTIFICATE_P12 CERTIFICATE_PASSWORD
+          ./script/package_macos.sh "${flags[@]}" "$BUILD_ARCH"
+          version=$(node -p 'require("./desktop/package.json").version')
+          mkdir -p build/ci/macos
+          cp "$output/VibeMic-$version-$BUILD_ARCH.dmg" build/ci/macos/
+          printf '%s\n' "$signature" > "build/ci/macos/signing-$BUILD_ARCH.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-${{ matrix.arch }}
+          path: build/ci/macos/
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Publish tagged release
+    if: github.ref_type == 'tag'
+    needs: [firmware, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: firmware
+          path: build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: macos-*
+          path: release
+          merge-multiple: true
+      - name: Attach binaries and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          marker="<!-- Vaibik Actions release $GITHUB_SHA -->"
+          previous=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,body 2>/dev/null || true)
+          if [[ -n "$previous" ]]; then
+            if [[ "$(jq -r .isDraft <<<"$previous")" != true ]] || ! jq -er --arg marker "$marker" '.body | contains($marker)' <<<"$previous" >/dev/null; then
+              echo "Preserving existing release $GITHUB_REF_NAME."
+              exit 0
+            fi
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          for layout in 6 7; do
+            suffix=
+            if [[ "$layout" == 7 ]]; then suffix=-s140v7; fi
+            for mapping in rx:dongle tx:transmitter tx-v2-battery:transmitter-nicenano-v2-battery; do
+              target="${mapping%:*}"
+              role="${mapping#*:}"
+              cp "build/promicro-$target$suffix/zephyr/zephyr.uf2" "release/Vaibik-$version-$role-S140v$layout.uf2"
+            done
+          done
+          test -s "release/VibeMic-$version-arm64.dmg"
+          test -s "release/VibeMic-$version-x64.dmg"
+          cmp release/signing-arm64.txt release/signing-x64.txt
+          signature=$(cat release/signing-arm64.txt)
+          cat > release/notes.md <<EOF
+          $marker
+          - macOS 13.3+: arm64 for Apple Silicon and x64 for Intel. App signing: $signature. Apple notarization is pending.
+          - Match S140 v6 or v7 to the SoftDevice version in \`INFO_UF2.TXT\`. Use the battery-enabled image on a confirmed nice!nano v2.
+          EOF
+          if [[ -z "$previous" ]]; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease \
+              --title "Vaibik · VibeMic $version" --notes-file release/notes.md --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" release/*.dmg release/*.uf2 --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
