@@ -5,6 +5,11 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      verify_developer_id:
+        description: Build signed DMGs from main and save them as workflow artifacts
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -81,6 +86,8 @@ jobs:
     needs: firmware
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
+    env:
+      SIGN_DEVELOPER_ID: ${{ (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.verify_developer_id)) && 'true' || 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -106,13 +113,13 @@ jobs:
       - name: Create and verify DMG
         env:
           BUILD_ARCH: ${{ matrix.arch }}
-          CERTIFICATE_P12: ${{ github.ref_type == 'tag' && secrets.MACOS_CERTIFICATE_P12 || '' }}
-          CERTIFICATE_PASSWORD: ${{ github.ref_type == 'tag' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          CERTIFICATE_P12: ${{ env.SIGN_DEVELOPER_ID == 'true' && secrets.MACOS_CERTIFICATE_P12 || '' }}
+          CERTIFICATE_PASSWORD: ${{ env.SIGN_DEVELOPER_ID == 'true' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
         run: |
           flags=()
           output=build/source-release/macos
           signature='ad hoc'
-          if [[ -n "$CERTIFICATE_P12" || -n "$CERTIFICATE_PASSWORD" ]]; then
+          if [[ "$SIGN_DEVELOPER_ID" == true ]]; then
             if [[ -z "$CERTIFICATE_P12" || -z "$CERTIFICATE_PASSWORD" ]]; then
               echo "::error::Set both macOS signing secrets."
               exit 1
@@ -187,11 +194,11 @@ jobs:
           done
           test -s "release/VibeMic-$version-arm64.dmg"
           test -s "release/VibeMic-$version-x64.dmg"
-          cmp release/signing-arm64.txt release/signing-x64.txt
-          signature=$(cat release/signing-arm64.txt)
+          grep -qx 'Developer ID' release/signing-arm64.txt
+          grep -qx 'Developer ID' release/signing-x64.txt
           cat > release/notes.md <<EOF
           $marker
-          - macOS 13.3+: arm64 for Apple Silicon and x64 for Intel. App signing: $signature. Apple notarization is pending.
+          - macOS 13.3+: arm64 for Apple Silicon and x64 for Intel. Signed with Developer ID. Apple notarization is pending.
           - Match S140 v6 or v7 to the SoftDevice version in \`INFO_UF2.TXT\`. Use the battery-enabled image on a confirmed nice!nano v2.
           EOF
           if [[ -z "$previous" ]]; then
