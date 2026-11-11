@@ -8,6 +8,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -pedantic -I"$root/firmware/common" \
+    -I"$root/firmware/transmitter/src" \
     "$root/tests/host.c" "$root/firmware/common/protocol.c" \
-    "$root/firmware/common/playout.c" -o "$scratch/host-test"
+    "$root/firmware/common/playout.c" "$root/firmware/transmitter/src/dynamics.c" \
+    -o "$scratch/host-test"
 "$scratch/host-test"

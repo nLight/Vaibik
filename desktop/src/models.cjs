@@ -10,20 +10,16 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
 const run = promisify(execFile);
-const REVISION = '5359861c739e955e79d9a303bcbc70fb988958b1';
+const REVISION = '541d1f99c6b0c3cd0b11a95167540bb8edefd82b';
 const MODELS = Object.freeze({
-    base: Object.freeze({
-        file: 'ggml-base-q5_1.bin', size: 59707625,
-        sha256: '422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898'
-    }),
-    small: Object.freeze({
-        file: 'ggml-small-q5_1.bin', size: 190085487,
-        sha256: 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb'
+    parakeet: Object.freeze({
+        file: 'parakeet-tdt-0.6b-v3.q8_0.gguf', size: 713975456,
+        sha256: 'e3880d0aaaaf2c308ea2c35016b2b895c423eb3fda924c1b463d1c19b7f4d32e'
     })
 });
 
 function spec(id) {
-    if (!Object.hasOwn(MODELS, id)) throw new Error('Неизвестная модель Whisper.');
+    if (!Object.hasOwn(MODELS, id)) throw new Error('Неизвестная модель Parakeet.');
     return MODELS[id];
 }
 
@@ -85,7 +81,7 @@ class SpeechModels {
         const temporary = destination + `.${randomUUID()}.download`;
         try {
             await fsp.mkdir(this.#directory, { recursive: true });
-            const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/${REVISION}/${model.file}`;
+            const url = `https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3/resolve/${REVISION}/${model.file}`;
             const response = await fetch(url, { signal: AbortSignal.any([
                 abort.signal, AbortSignal.timeout(30 * 60 * 1000)
             ]) });
@@ -141,14 +137,13 @@ class SpeechModels {
         const directory = await fsp.mkdtemp(path.join(scratch, 'vibemic-audio-'));
         try {
             const input = path.join(directory, 'clip.wav');
-            const output = path.join(directory, 'draft');
+            const output = path.join(directory, 'draft.txt');
             await fsp.writeFile(input, wave, { mode: 0o600 });
-            const selected = ['auto', 'ru', 'en', 'de'].includes(language) ? language : 'auto';
-            await run(this.#runtime, ['-m', model, '-f', input, '-l', selected,
-                '-nt', '-otxt', '-of', output, '-ng'], {
+            await run(this.#runtime, ['transcribe', input, '--model', model,
+                '--format', 'text', '--output', output, '--no-warmup'], {
                 windowsHide: true, timeout: 180000, maxBuffer: 1024 * 1024
             });
-            return (await fsp.readFile(output + '.txt', 'utf8')).trim();
+            return (await fsp.readFile(output, 'utf8')).trim();
         } catch (error) {
             if (error.code === 'ENOENT') throw new Error('Движок распознавания не найден в сборке приложения.');
             if (error.killed) throw new Error('Распознавание заняло слишком много времени.');

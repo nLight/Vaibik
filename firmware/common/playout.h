@@ -5,7 +5,8 @@
 
 #define VM_USB_FRAME_SAMPLES (VM_SAMPLE_RATE / 1000u)
 #define VM_JITTER_SAMPLES (30u * VM_USB_FRAME_SAMPLES)
-#define VM_PLAYOUT_BLOCKS 128u
+/* Hold the beginning while a desktop app opens its audio input. */
+#define VM_PLAYOUT_BLOCKS 512u
 #define VM_PLAYOUT_CAPACITY (VM_PLAYOUT_BLOCKS * VM_BLOCK_SAMPLES)
 
 struct vm_playout_slot {
@@ -30,6 +31,7 @@ struct vm_playout {
 
 void vm_playout_reset(struct vm_playout *p, uint32_t start);
 bool vm_playout_push(struct vm_playout *p, uint32_t timestamp, const int16_t *pcm);
+void vm_playout_push_waiting(struct vm_playout *p, uint32_t timestamp, const int16_t *pcm);
 void vm_playout_end(struct vm_playout *p, uint32_t timestamp);
 bool vm_playout_begin(struct vm_playout *p);
 bool vm_playout_drained(const struct vm_playout *p);

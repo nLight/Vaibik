@@ -7,6 +7,16 @@ private func reply(_ result: [String: Any]) {
     FileHandle.standardOutput.write(encoded + Data([0x0a]))
 }
 
+if CommandLine.arguments.dropFirst().elementsEqual(["--approval"]) {
+    ApprovalTarget.run()
+    exit(0)
+}
+
+if CommandLine.arguments.dropFirst().elementsEqual(["--native-dictation"]) {
+    NativeDictation.run()
+    exit(0)
+}
+
 do {
     guard AXIsProcessTrusted() else {
         throw BridgeError("Разрешите VibeMic доступ в System Settings → Privacy & Security → Accessibility.")

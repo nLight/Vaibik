@@ -21,9 +21,9 @@ const UF2_MAX_BYTES = 2 * 1024 * 1024;
 const CURRENT = 'CURRENT.UF2';
 const INFO = 'INFO_UF2.TXT';
 const READ_VOLUME_FILE = constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
-const BOARD_ID = /^nRF52840-(?:nicenano|nice_nano|supermini|promicro(?:-s140v6)?)$/i;
+const BOARD_ID = /^nRF52840-(?:nicenano(?:-v2)?|nice_nano|supermini|promicro(?:-s140v6)?)$/i;
 const FILES = { transmitter: 'promicro-transmitter.uf2', receiver: 'promicro-receiver.uf2',
-    'mic-probe': 'promicro-mic-probe.uf2' };
+    'mic-probe': 'promicro-mic-probe.uf2', 'transmitter-v2-battery': 'promicro-transmitter-v2-battery.uf2' };
 const VOLUME_CHANGED = 'Диск загрузчика изменился. Обновите список плат и подтвердите прошивку заново.';
 const BACKUP_INVALID = 'CURRENT.UF2 повреждён или прочитан не полностью. Проверьте подключение платы.';
 

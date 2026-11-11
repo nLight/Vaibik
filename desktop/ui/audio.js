@@ -1,5 +1,6 @@
 import { t } from './i18n.mjs';
 import { pcm16Wav } from './pcm.mjs';
+import { pttTransport } from './ptt-hid.mjs';
 
 const INPUT_NAME = /\bPTT Dictation Mic\b/i;
 const RATE = 16000;
@@ -8,11 +9,23 @@ export function isVibeMicInput(device) {
     return INPUT_NAME.test(device.label);
 }
 
+export function pttInputs(devices, transport) {
+    const dedicated = devices.filter(isVibeMicInput);
+    const wired = dedicated.filter(device => pttTransport(device.label) === 'usb');
+    if (transport === 'usb' || (!transport && wired.length)) return wired;
+    return transport === 'radio' ? dedicated.filter(device => pttTransport(device.label) === 'radio') : dedicated;
+}
+
 function openMicrophone(deviceId) {
     return navigator.mediaDevices.getUserMedia({ audio: {
         deviceId: { exact: deviceId }, channelCount: 1,
         echoCancellation: false, noiseSuppression: false, autoGainControl: false
     } });
+}
+
+function inputUnavailable(error) {
+    return error?.name === 'NotFoundError' || (error?.name === 'OverconstrainedError' &&
+        (!error.constraint || error.constraint === 'deviceId'));
 }
 
 export async function openReadyInput(deviceId) {
@@ -52,6 +65,9 @@ export async function openReadyInput(deviceId) {
         };
     } catch (error) {
         await closeInput();
+        if (inputUnavailable(error)) {
+            throw new Error(t('Выбранный вход недоступен. Подключите его или выберите другой.'), { cause: error });
+        }
         throw error;
     }
 }
@@ -68,15 +84,26 @@ export async function microphones(requestPermission = false) {
     return devices.filter(x => x.deviceId && x.deviceId !== 'default' && x.deviceId !== 'communications');
 }
 
-export async function startCapture(deviceId, options) {
-    if (!deviceId) {
-        const devices = (await microphones()).filter(isVibeMicInput);
+export async function startCapture(deviceId, options = {}) {
+    const resolveInput = async () => {
+        const devices = pttInputs(await microphones(), options.transport);
         if (devices.length !== 1) {
             throw new Error(t('Выберите микрофон на странице «Распознавание».'));
         }
-        deviceId = devices[0].deviceId;
+        return devices[0].deviceId;
+    };
+    let input;
+    if (deviceId) input = await openReadyInput(deviceId);
+    else {
+        const first = await resolveInput();
+        try { input = await openReadyInput(first); }
+        catch (error) {
+            if (!inputUnavailable(error.cause)) throw error;
+            const replacement = await resolveInput();
+            if (replacement === first) throw error;
+            input = await openReadyInput(replacement);
+        }
     }
-    const input = await openReadyInput(deviceId);
     try { return input.begin(options); }
     finally { await input.close(); }
 }

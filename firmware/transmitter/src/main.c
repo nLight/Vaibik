@@ -1,6 +1,11 @@
 #include "capture.h"
+#include "battery.h"
+#include "dynamics.h"
 #include "link.h"
 #include "protocol.h"
+#include "ptt_gesture.h"
+#include "session.h"
+#include "usb.h"
 
 #include <errno.h>
 #include <string.h>
@@ -12,8 +17,9 @@
 
 LOG_MODULE_REGISTER(vibemic_tx, LOG_LEVEL_INF);
 
-#define PRE_ROLL_BLOCKS (120u / VM_BLOCK_MS)
-#define TX_QUEUE_BLOCKS 40u
+#define HOLD_BLOCKS (IS_ENABLED(CONFIG_VIBEMIC_APPROVAL_GESTURE) ? VM_HOLD_BLOCKS : 0u)
+#define PRE_ROLL_BLOCKS (120u / VM_BLOCK_MS + HOLD_BLOCKS)
+#define TX_QUEUE_BLOCKS (40u + HOLD_BLOCKS)
 #define DEBOUNCE_BLOCKS 2u
 #define UP_RESTARTS 2u
 #define UP_RESTART_DELAY_MS 12u
@@ -133,14 +139,35 @@ static bool enqueue(uint8_t flag, uint32_t session, uint32_t block, const int16_
 	return true;
 }
 
+static bool send_audio(uint32_t usb, enum vm_flag flag, uint32_t session,
+		       uint32_t block, const int16_t *pcm)
+{
+	if (IS_ENABLED(CONFIG_VIBEMIC_DIRECT_USB) && usb) {
+		uint8_t wire[VM_AUDIO_BYTES];
+
+		if (usb != vm_usb_connection()) {
+			return false;
+		}
+		vm_encode(wire, flag, session, block, pcm);
+		vm_session_accept(wire, flag == VM_AUDIO ? VM_AUDIO_BYTES : VM_HEADER_BYTES,
+				  0, k_uptime_get_32());
+		return true;
+	}
+	return enqueue(flag, session, block, pcm);
+}
+
 int main(void)
 {
 	int16_t pcm[VM_BLOCK_SAMPLES];
 	uint32_t session = sys_rand32_get();
 	uint32_t block = 0;
 	uint32_t dropped = 0;
+	uint32_t capture_block = 0;
+	uint32_t usb = 0, press_usb = 0;
+	uint32_t battery_at = 0;
 	unsigned write = 0, have = 0, debounce = 0;
-	bool pressed = false;
+	struct vm_ptt_gesture ptt_state = {0};
+	struct vm_dynamics dynamics;
 	int err;
 
 	if (!gpio_is_ready_dt(&ptt) || !gpio_is_ready_dt(&led)) {
@@ -160,61 +187,115 @@ int main(void)
 		LOG_ERR("TX initialization failed: %d", err);
 		return err;
 	}
+	if (IS_ENABLED(CONFIG_VIBEMIC_DIRECT_USB)) {
+		err = vm_usb_init();
+		if (err != 0) {
+			LOG_WRN("Direct USB initialization failed: %d", err);
+		}
+	}
 
 	k_thread_create(&radio_thread, radio_stack, K_THREAD_STACK_SIZEOF(radio_stack),
 			radio_worker, NULL, NULL, NULL, 4, 0, K_NO_WAIT);
+	vm_dynamics_reset(&dynamics);
+	vm_battery_start();
 
 	for (;;) {
 		err = vm_capture_read(pcm);
 		if (err != 0) {
 			/* Release on capture failure; RX watchdog covers a lost UP. */
-			if (pressed) {
+			if (ptt_state.recording && !press_usb) {
 				enqueue(VM_PTT_UP, session, block, NULL);
-				gpio_pin_set_dt(&led, 0);
 			}
+			if (IS_ENABLED(CONFIG_VIBEMIC_DIRECT_USB)) {
+				vm_usb_stop();
+			}
+			gpio_pin_set_dt(&led, 0);
 			vm_capture_stop();
 			LOG_ERR("PDM stopped: %d; reset transmitter to retry", err);
 			return err;
 		}
+		vm_dynamics_process(&dynamics, pcm);
 
+		if (IS_ENABLED(CONFIG_VIBEMIC_DIRECT_USB) && usb != vm_usb_connection()) {
+			usb = vm_usb_connection();
+			vm_session_reset();
+			ptt_state.armed = false;
+			if (press_usb && ptt_state.recording) {
+				gpio_pin_set_dt(&led, 0);
+			}
+		}
 		int level = gpio_pin_get_dt(&ptt);
-		bool edge = false;
+		bool pressed = ptt_state.pressed;
 
 		if (level < 0 || (level != 0) == pressed) {
 			debounce = 0;
 		} else if (++debounce == DEBOUNCE_BLOCKS) {
 			debounce = 0;
-			edge = true;
+			pressed = level != 0;
 		}
+		if (pressed && !ptt_state.pressed) {
+			/* Keep the same output for the whole press, including its audio tail. */
+			press_usb = usb;
+		}
+		enum vm_flag event = vm_ptt_step(&ptt_state, pressed, capture_block++,
+					       IS_ENABLED(CONFIG_VIBEMIC_APPROVAL_GESTURE));
 
-		if (edge && !pressed) {
-			pressed = true;
+		if (event == VM_PTT_DOWN) {
 			session++;
 			block = 0;
 			dropped = 0;
-			enqueue(VM_PTT_DOWN, session, block, NULL);
-			gpio_pin_set_dt(&led, 1);
+			send_audio(press_usb, VM_PTT_DOWN, session, block, NULL);
+			gpio_pin_set_dt(&led, !press_usb || press_usb == usb);
 			for (unsigned i = 0; i < have; i++) {
 				unsigned index = (write + PRE_ROLL_BLOCKS - have + i) %
 						 PRE_ROLL_BLOCKS;
-				if (!enqueue(VM_AUDIO, session, block++, pre_roll[index])) {
+				if (!send_audio(press_usb, VM_AUDIO, session, block++, pre_roll[index])) {
 					dropped++;
 				}
 			}
 		}
-		if (pressed) {
-			if (!enqueue(VM_AUDIO, session, block++, pcm)) {
+		if (ptt_state.recording || event == VM_PTT_UP) {
+			if (!send_audio(press_usb, VM_AUDIO, session, block++, pcm)) {
 				dropped++;
 			}
 		}
-		if (edge && pressed && level == 0) {
+		if (event == VM_PTT_UP) {
 			/* The UP fence carries the exact end timestamp, even if audio was lost. */
-			enqueue(VM_PTT_UP, session, block, NULL);
-			pressed = false;
+			send_audio(press_usb, VM_PTT_UP, session, block, NULL);
 			gpio_pin_set_dt(&led, 0);
 			if (dropped != 0) {
 				LOG_WRN("TX queue dropped %u audio blocks", dropped);
 			}
+		}
+		if (event == VM_APPROVAL_ARM) {
+			session++;
+		}
+		if (event == VM_APPROVAL_ARM || event == VM_APPROVAL_COMMIT) {
+			/* Keep the gesture on one transport and out of the radio audio backlog. */
+			if (press_usb == usb && (usb || k_msgq_num_used_get(&tx_queue) == 0)) {
+				send_audio(press_usb, event, session, 0, NULL);
+			} else {
+				ptt_state.armed = false;
+			}
+		}
+		if (IS_ENABLED(CONFIG_VIBEMIC_DIRECT_USB) && usb == vm_usb_connection() && usb) {
+			vm_session_tick(k_uptime_get_32());
+		}
+
+		uint32_t now = k_uptime_get_32();
+		if (now - battery_at >= 5000u && !ptt_state.pressed && !ptt_state.recording &&
+		    !ptt_state.armed && k_msgq_num_used_get(&tx_queue) == 0) {
+			struct vm_battery battery = vm_battery_read();
+			struct esb_payload packet = {
+				.pipe = 0, .noack = false, .length = VM_BATTERY_BYTES,
+			};
+			vm_encode_battery(packet.data, &battery);
+			if (usb) {
+				vm_session_accept(packet.data, packet.length, 0, now);
+			} else {
+				k_msgq_put(&tx_queue, &packet, K_NO_WAIT);
+			}
+			battery_at = now;
 		}
 
 		memcpy(pre_roll[write], pcm, sizeof(pcm));

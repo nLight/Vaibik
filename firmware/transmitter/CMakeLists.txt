@@ -7,5 +7,8 @@ target_sources(app PRIVATE src/capture.c)
 if(CONFIG_VIBEMIC_MIC_PROBE)
   target_sources(app PRIVATE src/mic_probe.c)
 else()
-  target_sources(app PRIVATE src/main.c ../common/link.c ../common/protocol.c)
+  target_sources(app PRIVATE src/main.c src/dynamics.c src/battery.c ../common/link.c ../common/protocol.c)
 endif()
+
+target_sources_ifdef(CONFIG_VIBEMIC_DIRECT_USB app PRIVATE
+                     ../common/usb.c ../common/session.c ../common/playout.c)

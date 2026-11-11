@@ -1,6 +1,6 @@
 {
   "name": "vibemic-desktop",
-  "version": "0.1.22",
+  "version": "0.1.34",
   "private": true,
   "description": "VibeMic voice console for Codex and Claude Code",
   "homepage": "https://nlight.github.io/Vaibik/",
@@ -48,7 +48,7 @@
         "zip"
       ],
       "icon": "assets/icon.png",
-      "minimumSystemVersion": "13.0",
+      "minimumSystemVersion": "13.3",
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "category": "public.app-category.developer-tools",

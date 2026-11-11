@@ -20,8 +20,14 @@ struct vm_link_stats {
 };
 
 int vm_usb_init(void);
+void vm_usb_stop(void);
+uint32_t vm_usb_connection(void);
 int vm_usb_key(bool down, const struct vm_link_stats *stats);
+int vm_usb_approval(enum vm_flag flag, uint32_t token);
+int vm_usb_battery(const struct vm_battery *battery);
 bool vm_usb_key_sent(void);
+bool vm_usb_shortcut_requested(void);
+void vm_usb_shortcut_tick(void);
 bool vm_usb_stream_ready(uint32_t *since);
 uint32_t vm_usb_frame_errors(void);
 

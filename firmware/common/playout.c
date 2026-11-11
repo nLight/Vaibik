@@ -50,6 +50,18 @@ bool vm_playout_push(struct vm_playout *p, uint32_t timestamp, const int16_t *pc
 	return true;
 }
 
+void vm_playout_push_waiting(struct vm_playout *p, uint32_t timestamp, const int16_t *pcm)
+{
+	/* Preserve pre-roll until the buffer fills, then keep the most recent audio. */
+	if (timestamp >= p->cursor && timestamp - p->cursor >= VM_PLAYOUT_CAPACITY) {
+		uint32_t oldest = timestamp - VM_PLAYOUT_CAPACITY + VM_BLOCK_SAMPLES;
+
+		p->dropped += (oldest - p->cursor + VM_BLOCK_SAMPLES - 1u) / VM_BLOCK_SAMPLES;
+		p->cursor = oldest;
+	}
+	vm_playout_push(p, timestamp, pcm);
+}
+
 void vm_playout_end(struct vm_playout *p, uint32_t timestamp)
 {
 	/* Limit concealment to at most one buffer if a broken sender jumps ahead. */

@@ -39,4 +39,10 @@ for role in transmitter receiver; do
   build "promicro-$short" "$role"
   build "promicro-$short-s140v7" "$role" -- -DEXTRA_DTC_OVERLAY_FILE="$s140v7"
 done
+for variant in '' '-s140v7'; do
+  extra=()
+  if [[ -n "$variant" ]]; then extra+=("-DEXTRA_DTC_OVERLAY_FILE=$s140v7"); fi
+  build "promicro-tx-v2-battery$variant" transmitter -- \
+    "-DEXTRA_CONF_FILE=$repo/firmware/transmitter/nicenano-v2-battery.conf" "${extra[@]}"
+done
 build_probe

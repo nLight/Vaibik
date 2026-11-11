@@ -4,3 +4,34 @@ source "Kconfig.zephyr"
 
 config VIBEMIC_MIC_PROBE
 	bool "Capture a three-second PCM clip over USB CDC ACM"
+
+config VIBEMIC_APPROVAL_GESTURE
+	bool "Distinguish a double tap from a dictation hold"
+	default y if BOARD_PROMICRO_NRF52840
+
+config VIBEMIC_DIRECT_USB
+	bool "Offer the microphone and PTT directly to a USB host"
+	default y if BOARD_PROMICRO_NRF52840
+	depends on BOARD_PROMICRO_NRF52840 && !VIBEMIC_MIC_PROBE
+	select USB_DEVICE_STACK_NEXT
+	select USBD_AUDIO2_CLASS
+	select USBD_HID_SUPPORT
+	select HWINFO
+
+choice VIBEMIC_BATTERY_SENSOR
+	prompt "Transmitter battery measurement circuit"
+	default VIBEMIC_BATTERY_NONE
+	depends on BOARD_PROMICRO_NRF52840 && !VIBEMIC_MIC_PROBE
+
+config VIBEMIC_BATTERY_NONE
+	bool "Unknown circuit (report power only)"
+
+config VIBEMIC_BATTERY_VDDH
+	bool "nice!nano v2: internal VDDH / 5"
+	select ADC
+
+config VIBEMIC_BATTERY_DIVIDER
+	bool "nice!nano v1: AIN2, 806k + 2M divider"
+	select ADC
+
+endchoice

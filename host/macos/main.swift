@@ -60,7 +60,7 @@ private final class Bridge {
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        log("Ready. Focus Claude or Codex and hold PTT.")
+        log("Ready. Focus an input field and hold PTT.")
         CFRunLoopRun()
     }
 

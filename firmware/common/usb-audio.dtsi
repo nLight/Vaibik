@@ -1,0 +1,50 @@
+#include <zephyr/dt-bindings/usb/audio.h>
+
+/ {
+	ptt_keyboard: ptt-keyboard {
+		compatible = "zephyr,hid-device";
+		in-report-size = <8>;
+		in-polling-period-us = <1000>;
+	};
+
+	ptt_shortcut: ptt-shortcut {
+		compatible = "zephyr,hid-device";
+		in-report-size = <8>;
+		in-polling-period-us = <1000>;
+	};
+
+	ptt_mic: usb-microphone {
+		compatible = "zephyr,uac2";
+		full-speed;
+		audio-function = <AUDIO_FUNCTION_MICROPHONE>;
+
+		ptt_clock: usb-clock {
+			compatible = "zephyr,uac2-clock-source";
+			clock-type = "internal-fixed";
+			sof-synchronized;
+			frequency-control = "read-only";
+			sampling-frequencies = <16000>;
+		};
+
+		ptt_mic_in: microphone-input {
+			compatible = "zephyr,uac2-input-terminal";
+			clock-source = <&ptt_clock>;
+			terminal-type = <INPUT_TERMINAL_MICROPHONE>;
+			front-center;
+		};
+
+		ptt_usb_out: usb-output {
+			compatible = "zephyr,uac2-output-terminal";
+			data-source = <&ptt_mic_in>;
+			clock-source = <&ptt_clock>;
+			terminal-type = <USB_TERMINAL_STREAMING>;
+		};
+
+		audio-stream {
+			compatible = "zephyr,uac2-audio-streaming";
+			linked-terminal = <&ptt_usb_out>;
+			subslot-size = <2>;
+			bit-resolution = <16>;
+		};
+	};
+};

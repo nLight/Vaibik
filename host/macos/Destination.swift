@@ -1,22 +1,28 @@
 import AppKit
 import ApplicationServices
 
-private let desktopApps = ["com.openai.codex", "com.anthropic.claudefordesktop"]
 private let terminalApps = [
     "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty",
     "com.superlogical.rex", "net.kovidgoyal.kitty", "com.github.wez.wezterm", "dev.warp.Warp-Stable"
 ]
 
-private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     var value: CFTypeRef?
     return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
 }
 
-private func axElement(_ element: AXUIElement, _ name: String) -> AXUIElement? {
+func axElement(_ element: AXUIElement, _ name: String) -> AXUIElement? {
     guard let value = attribute(element, name), CFGetTypeID(value) == AXUIElementGetTypeID() else {
         return nil
     }
     return (value as! AXUIElement)
+}
+
+private func literalInput(_ text: String) -> String {
+    // A focused editor can be a terminal, where pasted line breaks may submit commands.
+    let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+    let printable = line.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
+    return String(String.UnicodeScalarView(printable))
 }
 
 struct TmuxPane: Equatable {
@@ -55,10 +61,7 @@ struct TmuxPane: Equatable {
 
     func paste(_ text: String) throws {
         guard try Self.active() == self else { throw BridgeError("The terminal pane changed.") }
-        // A single line with printable characters cannot inject Enter or terminal controls.
-        let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
-            .unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
-        let literal = String(String.UnicodeScalarView(line))
+        let literal = literalInput(text)
         guard !literal.isEmpty else { return }
 
         let buffer = "vibemic-\(UUID().uuidString)"
@@ -88,61 +91,97 @@ struct Destination {
     let pane: TmuxPane?
 
     static func focused() throws -> Destination {
-        guard let app = NSWorkspace.shared.frontmostApplication, let bundle = app.bundleIdentifier
-        else { throw BridgeError("No target application is focused.") }
-        let terminal = terminalApps.contains(bundle)
-        guard desktopApps.contains(bundle) || terminal else {
-            throw BridgeError("Focus Claude, Codex, or their tmux pane.")
-        }
+        let focusError = BridgeError("Focus the input field in the target app before holding PTT.")
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.bundleIdentifier != "dev.vibemic.desktop",
+              app.processIdentifier != getppid() else { throw focusError }
+        let terminal = terminalApps.contains(app.bundleIdentifier ?? "")
         let element = AXUIElementCreateApplication(app.processIdentifier)
-        guard let window = axElement(element, kAXFocusedWindowAttribute),
-              let field = axElement(element, kAXFocusedUIElementAttribute) ?? (terminal ? window : nil) else {
-            throw BridgeError("Focus the prompt field before holding PTT.")
-        }
-        if !terminal {
-            let role = attribute(field, kAXRoleAttribute) as? String
-            guard role == kAXTextAreaRole || role == kAXTextFieldRole else {
-                throw BridgeError("Focus the prompt field before holding PTT.")
+        // Electron exposes its editor after assistive technology requests the web tree.
+        if attribute(element, "AXManualAccessibility") as? Bool != true,
+           AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString,
+                                       kCFBooleanTrue) == .success {
+            // Electron debounces this request for two seconds on recent macOS.
+            let deadline = ProcessInfo.processInfo.systemUptime + 2.5
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                if let field = axElement(element, kAXFocusedUIElementAttribute),
+                   attribute(field, kAXSelectedTextRangeAttribute) != nil {
+                    break
+                }
+                Thread.sleep(forTimeInterval: 0.025)
             }
         }
-        return try Destination(pid: app.processIdentifier, window: window,
-                               title: terminal ? nil : attribute(window, kAXTitleAttribute) as? String,
-                               field: field,
-                               pane: terminal ? TmuxPane.active() : nil)
+        let focusedField = axElement(element, kAXFocusedUIElementAttribute)
+            ?? axElement(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute)
+        guard let window = axElement(element, kAXFocusedWindowAttribute)
+                ?? focusedField.flatMap({ axElement($0, kAXWindowAttribute) }),
+              let field = focusedField ?? (terminal ? window : nil) else { throw focusError }
+        var fieldPID: pid_t = 0
+        guard AXUIElementGetPid(field, &fieldPID) == .success,
+              fieldPID == app.processIdentifier,
+              attribute(field, kAXEnabledAttribute) as? Bool != false else { throw focusError }
+        if attribute(field, kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole {
+            throw BridgeError("Protected input. Focus a regular text field.")
+        }
+        let pane = terminal ? try? TmuxPane.active() : nil
+        return Destination(pid: app.processIdentifier, window: window,
+                           title: pane == nil ? attribute(window, kAXTitleAttribute) as? String : nil,
+                           field: field, pane: pane)
     }
 
-    func insert(_ text: String) throws {
-        let current = try Self.focused()
-        guard current.pid == pid, CFEqual(current.window, window),
+    private func checkFocus() throws {
+        guard let current = try? Self.focused(), current.pid == pid, CFEqual(current.window, window),
               current.title == title, CFEqual(current.field, field), current.pane == pane else {
             throw BridgeError("Focus changed while dictating. Draft insertion was cancelled.")
         }
+    }
+
+    private func isWebEditor() -> Bool {
+        var element = field
+        for _ in 0..<32 {
+            if attribute(element, kAXRoleAttribute) as? String == "AXWebArea" {
+                return true
+            }
+            guard !CFEqual(element, window),
+                  let parent = axElement(element, kAXParentAttribute) else { return false }
+            element = parent
+        }
+        return true
+    }
+
+    func insert(_ text: String) throws {
+        try checkFocus()
         if let pane {
             try pane.paste(text)
             return
         }
+        let literal = literalInput(text)
+        guard !literal.isEmpty else { return }
         var writable: DarwinBoolean = false
-        if AXUIElementIsAttributeSettable(field, kAXSelectedTextAttribute as CFString, &writable)
+        if !isWebEditor(),
+           AXUIElementIsAttributeSettable(field, kAXSelectedTextAttribute as CFString, &writable)
             == .success, writable.boolValue,
-           AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, text as CFString)
+           AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, literal as CFString)
             == .success {
             return
         }
-
+        // Paste through the editor so web inputs also update their application state.
         let pasteboard = NSPasteboard.general
         let previous = pasteboard.pasteboardItems?.map { item in
             item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
         } ?? []
-        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else {
+        guard let source = CGEventSource(stateID: .privateState),
+              let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
             throw BridgeError("Could not create the desktop paste event.")
         }
+        try checkFocus()
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(literal, forType: .string)
         let change = pasteboard.changeCount
         for event in [down, up] {
             event.flags = .maskCommand
-            event.postToPid(pid)
+            event.post(tap: .cghidEventTap)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500)) {
             guard pasteboard.changeCount == change else { return }

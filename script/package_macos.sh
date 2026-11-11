@@ -66,7 +66,7 @@ for arch in "${architectures[@]}"; do
   output="$stage/$arch"
   resources="$stage/resources-$arch"
   config="$stage/electron-builder.json"
-  env -u VIBEMIC_WHISPER_CLI -u VIBEMIC_DRAFT_HELPER \
+  env -u VIBEMIC_NEMO_RUNTIME -u VIBEMIC_DRAFT_HELPER \
     VIBEMIC_MAC_ARCH="$arch" VIBEMIC_RESOURCES="$resources" node script/prepare_desktop.mjs
   node - "$config" "$output" "$resources" "$identity" <<'JS'
 const fs = require('node:fs');
@@ -96,8 +96,14 @@ JS
   verify_signer "$app"
   [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$contents/Info.plist") == "$version" ]] \
     || fail "Unexpected version in $app."
-  for binary in "$contents/MacOS/VibeMic" "$packed/engine/whisper-cli" \
+  for binary in "$contents/MacOS/VibeMic" "$packed/engine/nemo/bin/nemo-speech" \
       "$packed/engine/vibemic-desktop-draft" "$pty/spawn-helper" "$pty/pty.node"; do
+    [[ $(lipo -archs "$binary") == "$expected" ]] || fail "Unexpected architecture in $binary."
+    /usr/bin/codesign --verify --strict "$binary"
+    verify_signer "$binary"
+  done
+  for binary in "$packed/engine/nemo/lib/"*.dylib; do
+    [[ -L "$binary" ]] && continue
     [[ $(lipo -archs "$binary") == "$expected" ]] || fail "Unexpected architecture in $binary."
     /usr/bin/codesign --verify --strict "$binary"
     verify_signer "$binary"

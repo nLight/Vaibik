@@ -20,7 +20,7 @@ module.exports = async (window, directory) => {
         await fs.writeFile(path.join(directory, name + '.png'), page.toPNG());
     }
     await waitFor('Boolean(window.fixture)');
-    await exec("fixture.setMicrophones([]); fixture.setModelStatus('small', { installed: false }); true");
+    await exec("fixture.setMicrophones([]); fixture.setModelStatus('parakeet', { installed: false }); true");
     await waitFor("document.querySelector('#capture-title').textContent === 'Выберите микрофон'");
     await save('56-setup-new-profile');
     window.setContentSize(740, 615);
@@ -34,18 +34,18 @@ module.exports = async (window, directory) => {
     await exec("document.querySelector('#microphone').value = 'test-mic'; document.querySelector('#microphone').dispatchEvent(new Event('change')); true");
     await waitFor("vibemic.init().then(value => value.settings.microphone === 'test-mic')");
     await exec("fixture.go('overview'); true");
-    await waitFor("document.querySelector('#capture-title').textContent === 'Установите Whisper'");
-    await save('59-setup-needs-whisper');
+    await waitFor("document.querySelector('#capture-title').textContent === 'Установите Parakeet'");
+    await save('59-setup-needs-parakeet');
     await exec("document.querySelector('#guide-next').click(); true");
     await waitFor("document.activeElement.id === 'local-models'");
-    await save('60-setup-whisper-options');
-    await exec("fixture.go('overview'); fixture.setModelStatus('small', { downloading: true }, 38); true");
+    await save('60-setup-parakeet-options');
+    await exec("fixture.go('overview'); fixture.setModelStatus('parakeet', { downloading: true }, 38); true");
     await waitFor("document.querySelector('#capture-title').textContent === 'Загружается модель'");
     await save('61-setup-downloading');
     await exec("document.querySelector('#guide-next').click(); true");
-    await waitFor("document.activeElement.id === 'local-models' && !document.querySelector('[data-model=small] progress').hidden");
+    await waitFor("document.activeElement.id === 'local-models' && !document.querySelector('[data-model=parakeet] progress').hidden");
     await save('61b-setup-download-progress');
-    await exec("fixture.go('overview'); fixture.setModelStatus('small', { installed: true }); true");
+    await exec("fixture.go('overview'); fixture.setModelStatus('parakeet', { installed: true }); true");
     await waitFor("!document.querySelector('#manual-ptt').hidden && document.querySelector('#capture-hint').textContent.includes('экранную кнопку')");
     await save('62-setup-trial-ready');
     await exec("document.querySelector('#ready-output').click(); true");
@@ -95,9 +95,9 @@ module.exports = async (window, directory) => {
     window.setContentSize(1140, 780);
     await exec("document.querySelector('#dismiss').click(); fixture.go('speech')");
     await save('05-speech');
-    await exec("fixture.setModelStatus('base', { downloading: true }, 48)");
+    await exec("fixture.setModelStatus('parakeet', { downloading: true }, 48)");
     await save('06-model-download');
-    await exec("fixture.go('agents')");
+    await exec("fixture.setModelStatus('parakeet', { installed: true }); fixture.go('agents')");
     await save('07-agents');
     await exec("document.querySelector('[data-agent=claude] .primary').click(); true");
     await waitFor("document.querySelector('dialog').open");
@@ -139,6 +139,40 @@ module.exports = async (window, directory) => {
         await exec("fixture.begin('hardware'); fixture.release('hardware'); true");
         await waitFor("document.querySelector('#draft-state').textContent.includes('открытое приложение')");
         await save('17-external-draft');
+
+        if (process.platform === 'darwin') {
+            const { ipcMain } = require('electron');
+            ipcMain.removeHandler('draft:prepare-external');
+            ipcMain.handle('draft:prepare-external', () => {
+                throw new Error('Focus the input field in the target app before holding PTT.');
+            });
+            try {
+                for (const [language, label, warning] of [
+                    ['ru', 'Активное приложение', 'Черновик сохранён в VibeMic. Перед нажатием PTT поставьте курсор в поле ввода нужного приложения.'],
+                    ['en', 'Active application', 'Draft saved in VibeMic. Focus the input field in the target app before holding PTT.']
+                ]) {
+                    await exec(`(() => {
+                        const selector = document.querySelector('#ui-language'); selector.value = '${language}';
+                        selector.dispatchEvent(new Event('change')); fixture.go('agents'); return true;
+                    })()`);
+                    await waitFor(`document.querySelector('#output').selectedOptions[0].textContent === ${JSON.stringify(label)}`);
+                    window.setContentSize(740, 615);
+                    await exec("document.querySelector('#output').closest('.card').scrollIntoView({block:'center'}); true");
+                    await save(`17a-active-application-${language}`);
+                    await exec("fixture.go('overview'); fixture.begin('hardware'); fixture.release('hardware'); true");
+                    await waitFor(`document.querySelector('#notification-text').textContent === ${JSON.stringify(warning)} &&
+                        document.querySelector('#draft-text').value.length > 0 && document.querySelector('.hero').dataset.state === 'idle'`);
+                    await save(`17b-external-focus-error-${language}`);
+                    await exec("document.querySelector('#dismiss').click(); true");
+                }
+            } finally {
+                ipcMain.removeHandler('draft:prepare-external');
+                ipcMain.handle('draft:prepare-external', () => 'fixture-draft');
+            }
+            await exec("document.querySelector('#ui-language').value = 'ru'; document.querySelector('#ui-language').dispatchEvent(new Event('change')); true");
+            await waitFor("document.documentElement.lang === 'ru'");
+            window.setContentSize(1140, 780);
+        }
     }
     await exec("fixture.go('agents'); document.querySelector('#stop-terminal').click(); true");
     await waitFor("document.querySelector('dialog').open");
@@ -305,19 +339,19 @@ module.exports = async (window, directory) => {
     await save('44-pair-reset');
     window.setContentSize(1140, 780);
 
-    await exec("fixture.setModelStatus('small', { damaged: true }); fixture.setModelStatus('base', { installed: true }); fixture.go('speech'); true");
+    await exec("fixture.setModelStatus('parakeet', { damaged: true }); fixture.go('speech'); true");
     await save('45-model-damaged');
     window.setContentSize(740, 615);
     await save('46-model-damaged-compact');
-    await exec("fixture.setModelStatus('small', { damaged: true, downloading: true }, 57); document.querySelector('[data-model=small]').scrollIntoView({ block: 'end' }); true");
+    await exec("fixture.setModelStatus('parakeet', { damaged: true, downloading: true }, 57); document.querySelector('[data-model=parakeet]').scrollIntoView({ block: 'end' }); true");
     await save('47-model-repairing');
-    await exec("fixture.setModelStatus('small', { damaged: true }); fixture.go('overview'); true");
+    await exec("fixture.setModelStatus('parakeet', { damaged: true }); fixture.go('overview'); true");
     await waitFor("document.querySelector('#ready-model').textContent.includes('Перескачайте')");
     await save('48-model-damaged-overview');
     await exec("fixture.begin('manual'); true");
     await waitFor("document.querySelector('#current-page').textContent === 'Распознавание' && document.querySelector('.hero').dataset.state === 'idle'");
     await save('49-model-damaged-recording-guard');
-    await exec("document.querySelector('#dismiss').click(); fixture.setModelStatus('small', { installed: true }); fixture.go('speech'); true");
+    await exec("document.querySelector('#dismiss').click(); fixture.setModelStatus('parakeet', { installed: true }); fixture.go('speech'); true");
     await save('50-model-repaired');
     window.setContentSize(1140, 780);
 
@@ -427,7 +461,7 @@ module.exports = async (window, directory) => {
     const importFile = path.join(localData, 'import-profile.json');
     const previous = await exec('vibemic.init()');
     const profile = { format: 'vibemic-profile', version: 1, settings: {
-        model: 'base', language: 'de', agent: 'claude', output: 'desktop', autoInsert: false, pairCode: '3C7F-10E2',
+        model: 'parakeet', language: 'de', agent: 'claude', output: 'desktop', autoInsert: false, pairCode: '3C7F-10E2',
         project: '/ignored/project', microphone: 'ignored-input'
     } };
     await fs.writeFile(importFile, JSON.stringify(profile));
@@ -456,7 +490,7 @@ module.exports = async (window, directory) => {
     await exec("document.querySelector('#confirm-action').click(); true");
     await waitFor("document.querySelector('#notification-text').textContent === 'Профиль применён.'");
     const current = await exec('vibemic.init().then(data=>data.settings)');
-    if (current.pairCode !== '3C7F-10E2' || current.language !== 'de' || current.model !== 'base' ||
+    if (current.pairCode !== '3C7F-10E2' || current.language !== 'auto' || current.model !== 'parakeet' ||
         current.agent !== 'claude' || current.output !== (previous.external ? 'desktop' : 'manual') ||
         current.autoInsert || current.project !== previous.settings.project || current.microphone !== previous.settings.microphone) {
         throw new Error('Import did not apply the reviewed portable settings');
@@ -598,6 +632,25 @@ module.exports = async (window, directory) => {
         await save('91-language-' + language);
         window.setContentSize(740, 615);
         await save('92-language-compact-' + language);
+
+        await exec(`fixture.setMicrophones([
+            { deviceId: 'fixture-mic', label: 'PTT Dictation Mic' },
+            { deviceId: 'fixture-wired', label: 'PTT Dictation Mic (USB)' }
+        ]); fixture.connectWired(); fixture.go('overview'); true`);
+        const status = language === 'en' ? 'Microphone connected by USB' : 'Микрофон подключён по USB';
+        await waitFor(`document.querySelector('#device-pill').textContent.includes(${JSON.stringify(status)})`);
+        await save('93-wired-overview-' + language);
+        window.setContentSize(1140, 780);
+        await exec("fixture.go('hardware'); true");
+        if (!await exec(`document.querySelector('#connect-hid').textContent === ${JSON.stringify(status)} &&
+            !document.querySelector('#link-check-toggle').disabled`)) {
+            throw new Error('The wired microphone did not enable the board check');
+        }
+        await save('94-wired-hardware-' + language);
+        await exec("fixture.go('speech'); true");
+        await waitFor("document.querySelector('#mic-status').textContent.includes('PTT Dictation Mic (USB)')");
+        await save('95-wired-speech-' + language);
+        await exec("fixture.disconnectHid(); fixture.setMicrophones(); fixture.connectHid(); true");
     }
     console.log('VibeMic UI review passed.');
 };

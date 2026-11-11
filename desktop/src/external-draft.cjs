@@ -44,7 +44,7 @@ class ExternalDraft {
         child.once('error', failed);
         child.once('close', () => failed(new Error('Системный мост завершился.')));
         target.timeout = setTimeout(() => this.cancel(id), 320000);
-        const startup = setTimeout(() => this.cancel(id), 3000);
+        const startup = setTimeout(() => this.cancel(id), 5000);
         try {
             const result = await this.#read(target);
             if (!result.ok) throw new Error(result.error);

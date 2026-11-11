@@ -8,7 +8,7 @@ work=/tmp/vibemic-work
 mkdir -p "$work/desktop" "$work/script"
 cp -R /source/desktop/{src,ui,assets,package.json,package-lock.json} "$work/desktop/"
 cp /source/script/{prepare_desktop.mjs,review_desktop.cjs} "$work/script/"
-for image in tx rx tx-s140v7 rx-s140v7 tx-probe tx-probe-s140v7; do
+for image in tx rx tx-s140v7 rx-s140v7 tx-probe tx-probe-s140v7 tx-v2-battery tx-v2-battery-s140v7; do
   destination="$work/build/promicro-$image/zephyr"
   mkdir -p "$destination"
   cp "/source/build/promicro-$image/zephyr/zephyr.uf2" "$destination/"

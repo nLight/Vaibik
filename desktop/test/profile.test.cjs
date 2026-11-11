@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { readProfile, writeProfile } = require('../src/profile.cjs');
 
-const portable = { model: 'base', language: 'ru', agent: 'claude', output: 'desktop', autoInsert: false, pairCode: '8B27-3DE4' };
+const portable = { model: 'parakeet', language: 'auto', dictationMode: 'auto', agent: 'claude', output: 'desktop', autoInsert: false, pairCode: '8B27-3DE4' };
 
 async function directory(t) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibemic-profile-'));
@@ -52,4 +52,18 @@ test('export protects the live config and removes temporary files when saving fa
     await assert.rejects(writeProfile(blocked, portable, config));
     assert.equal(await fs.readFile(config, 'utf8'), 'keep');
     assert.deepEqual((await fs.readdir(dir)).sort(), ['alias.json', 'directory.json', 'settings.json']);
+});
+
+test('old Whisper profiles migrate to Parakeet with automatic language and local mode', async t => {
+    const dir = await directory(t);
+    const file = path.join(dir, 'legacy.json');
+    const { dictationMode, ...legacy } = portable;
+    for (const model of ['base', 'small']) {
+        await fs.writeFile(file, JSON.stringify({ format: 'vibemic-profile', version: 1,
+            settings: { ...legacy, model, language: 'ru' } }));
+        assert.deepEqual(await readProfile(file), { ...portable, dictationMode: 'local' });
+    }
+    await fs.writeFile(file, JSON.stringify({ format: 'vibemic-profile', version: 1,
+        settings: { ...portable, dictationMode: 'unrecognized' } }));
+    await assert.rejects(readProfile(file), /неподдерживаемые настройки/);
 });

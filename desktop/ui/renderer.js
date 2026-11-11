@@ -1,5 +1,5 @@
 import { t, setLanguage, staticTranslations } from './i18n.mjs';
-import { isVibeMicInput, microphones, openReadyInput, startCapture } from '/audio.js';
+import { isVibeMicInput, microphones, openReadyInput, pttInputs, startCapture } from '/audio.js';
 import { watchPtt } from '/ptt-hid.mjs';
 import { capturePdmProbe } from '/pdm-probe.mjs';
 
@@ -34,8 +34,8 @@ function icons(root = document) {
 
 const pageNames = { overview: 'Обзор', hardware: 'Платы', speech: 'Распознавание', agents: 'Агенты', settings: 'Настройки' };
 const agentNames = { codex: 'Codex', claude: 'Claude Code' };
-const modelNames = { base: 'Whisper Base', small: 'Whisper Small' };
-const modelSizes = { base: '60 МБ', small: '190 МБ' };
+const modelNames = { parakeet: 'Parakeet TDT v3' };
+const modelSizes = { parakeet: '714 МБ' };
 const linkEndMessages = {
     radioTimeout: 'Связь с передатчиком прервалась.',
     hostTimeout: 'Донгл не дождался открытия аудиовхода.',
@@ -44,7 +44,8 @@ const linkEndMessages = {
 };
 const state = {
     settings: null, models: {}, agents: {}, fixture: false, hid: false,
-    page: 'overview', recording: null, processing: null, waiting: null, progress: {}, volumes: [], inputs: [], terminal: null
+    page: 'overview', recording: null, processing: null, waiting: null, progress: {}, volumes: [], inputs: [], terminal: null,
+    pttTransport: undefined, battery: null
 };
 const fixtureInputs = [
     { deviceId: 'fixture-mic', label: 'PTT Dictation Mic' },
@@ -66,9 +67,12 @@ let nextTakeId = 0;
 let drafts = [];
 let selectedDraft;
 
+function errorDetail(message) {
+    return t(String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''));
+}
+
 function notify(message, error = false) {
-    const detail = String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-    $('#notification-text').textContent = t(detail);
+    $('#notification-text').textContent = errorDetail(message);
     $('#notification').classList.toggle('error', error);
     $('#notification').hidden = false;
 }
@@ -105,8 +109,10 @@ function go(page) {
 
 async function save(patch) {
     const language = state.settings.uiLanguage;
+    const mode = state.settings.dictationMode;
     state.settings = await api.save(patch);
     if (language !== state.settings.uiLanguage) applyUiLanguage();
+    if (mode !== state.settings.dictationMode) await refreshMics();
     else render();
 }
 
@@ -129,7 +135,7 @@ function applyUiLanguage() {
 function selectedInput() {
     const selected = state.settings.microphone;
     if (selected) return state.inputs.find(input => input.deviceId === selected);
-    const dedicated = state.inputs.filter(isVibeMicInput);
+    const dedicated = pttInputs(state.inputs, state.pttTransport);
     return dedicated.length === 1 ? dedicated[0] : undefined;
 }
 
@@ -140,7 +146,7 @@ function recordingGuide(input, model) {
             : t('Для пробной записи подойдёт микрофон компьютера.'),
         action: t('Настроить микрофон'), target: '#refresh-mics', showBoards: !state.hid
     };
-    if (model?.installed) return null;
+    if (model?.installed || state.settings.dictationMode === 'auto') return null;
     if (Object.values(state.models).some(status => status.downloading)) return {
         title: t('Загружается модель'), hint: t('Пробная запись станет доступна после установки.'),
         action: t('Открыть загрузку'), target: '#local-models'
@@ -149,7 +155,7 @@ function recordingGuide(input, model) {
         title: t('Нужна замена модели'), hint: t('Скачайте проверенную копию или выберите другую модель.'),
         action: t('Открыть модели'), target: '#local-models'
     } : {
-        title: t('Установите Whisper'), hint: t('Выберите модель для локального распознавания речи.'),
+        title: t('Установите Parakeet'), hint: t('Загрузите модель для локального распознавания речи.'),
         action: t('Открыть модели'), target: '#local-models'
     };
 }
@@ -162,9 +168,13 @@ function focusControl(selector, region = selector) {
 function render() {
     if (!state.settings) return;
     const device = Boolean(state.hid);
+    renderBattery();
+    const deviceStatus = state.pttTransport === 'usb' ? t('Микрофон подключён по USB') : t('Донгл подключён');
     const model = state.models[state.settings.model];
     const agent = agentNames[state.settings.agent];
     const output = state.settings.output;
+    $('#dictation-label').textContent = state.settings.dictationMode === 'auto'
+        ? t('Автоматическая диктовка') : t('Локальное распознавание');
     const input = selectedInput();
     const status = state.recording ? 'recording' : state.processing ? 'processing' : 'idle';
     const guide = status === 'idle' ? recordingGuide(input, model) : null;
@@ -179,10 +189,11 @@ function render() {
     }
     $('#device-pill').classList.toggle('live', device);
     $('#device-pill').replaceChildren(Object.assign(document.createElement('span'), { className: 'dot' }),
-        document.createTextNode(device ? t('Донгл подключён') : t('Донгл не подключён')));
+        document.createTextNode(device ? deviceStatus : t('VibeMic не подключён')));
     $('#capture-status').textContent = { idle: guide ? t('Настройка записи') : t('Ожидание PTT'), recording: t('Идёт запись'), processing: t('Распознавание') }[status];
     $('#capture-title').textContent = { idle: guide?.title ?? t('Нажмите и говорите'),
-        recording: t('Говорите'), processing: t('Готовим черновик') }[status];
+        recording: state.recording?.native ? t`Диктовка в ${state.recording.native}` : t('Говорите'),
+        processing: t('Готовим черновик') }[status];
     $('#capture-hint').textContent = { idle: guide?.hint ?? (device && input && isVibeMicInput(input)
         ? t('Удерживайте кнопку на передатчике до конца фразы.') : t('Удерживайте экранную кнопку, пока говорите.')),
         recording: state.processing ? t('Предыдущая фраза распознаётся. Отпустите PTT в конце.')
@@ -192,20 +203,35 @@ function render() {
     $('#manual-ptt').hidden = Boolean(guide);
     $('#manual-ptt').disabled = Boolean(state.waiting || linkCheck || pdmProbe || !input);
     $('#ready-device').textContent = !device ? t('Подключите USB')
-        : standby?.input?.ready || (state.fixture && !standby) ? t('Готов к записи')
+        : standby?.input?.ready || (state.fixture && !standby) || (state.settings.dictationMode === 'auto' && input) ? t('Готов к записи')
             : standby ? t('Подготовка аудиовхода') : t('Проверьте аудиовход');
     $('#ready-model').textContent = model?.installed ? t`${modelNames[state.settings.model]} готова`
         : model?.downloading ? t('Модель загружается') : model?.damaged ? t('Перескачайте модель') : t('Установите модель');
+    const desktopOutput = state.platform === 'darwin' ? t('Активное приложение') : t('Открытый Claude или Codex');
+    $('#output option[value=desktop]').textContent = desktopOutput;
     $('#ready-agent').textContent = output === 'manual' ? t('Черновик в VibeMic')
-        : output === 'desktop' ? t('Открытый Claude или Codex')
+        : output === 'desktop' ? desktopOutput
         : state.terminal ? t`${agentNames[state.terminal.agent]} · сессия открыта`
             : `${agent} · ${state.agents[state.settings.agent]?.path ? t('откройте терминал') : t('установите CLI')}`;
-    $('#connect-hid').textContent = device ? t('Донгл подключён') : t('Подключить донгл');
+    $('#connect-hid').textContent = device ? deviceStatus : t('Подключить VibeMic');
     $('#connect-hid').disabled = device;
     renderLinuxAccess();
     renderLinkCheck();
     renderPdmProbe();
-    $('#language').value = state.settings.language;
+    $('#language').value = 'auto';
+    $('#dictation-mode').value = state.settings.dictationMode;
+    $('#dictation-mode').disabled = Boolean(state.recording || state.processing || state.waiting);
+    $('#dictation-mode option[value=auto]').disabled = state.platform !== 'darwin';
+    $('#codex-shortcut-settings').hidden = state.settings.dictationMode !== 'auto';
+    $('#codex-dictation-shortcut').checked = state.settings.codexDictationShortcut;
+    $('#codex-dictation-shortcut').disabled = $('#dictation-mode').disabled;
+    $('#claude-shortcut-settings').hidden = state.settings.dictationMode !== 'auto';
+    $('#claude-dictation-shortcut').checked = state.settings.claudeDictationShortcut;
+    $('#claude-dictation-shortcut').disabled = $('#dictation-mode').disabled;
+    $('#claude-shortcut-hint').hidden = !state.settings.claudeDictationShortcut;
+    $('#dictation-mode-hint').textContent = state.settings.dictationMode === 'auto'
+        ? t('В Codex и Claude включается встроенная диктовка, если она доступна. В остальных приложениях текст распознаёт Parakeet.')
+        : t('Parakeet распознаёт речь на этом компьютере и вставляет текст в выбранное место.');
     $('#agent').value = state.settings.agent;
     $('#output').value = output;
     $('#auto-insert').checked = state.settings.autoInsert;
@@ -213,7 +239,9 @@ function render() {
     $('#external-permissions').hidden = state.platform !== 'darwin' || output !== 'desktop';
     $('#output-hint').textContent = {
         terminal: t('Черновик попадёт в активную сессию встроенного терминала.'),
-        desktop: t('Во время записи оставьте курсор в поле ввода Claude или Codex.'),
+        desktop: state.platform === 'darwin'
+            ? t('Поставьте курсор в нужное поле ввода и удерживайте кнопку на передатчике.')
+            : t('Во время записи оставьте курсор в поле ввода Claude или Codex.'),
         manual: t('Текст останется в черновике, откуда его можно скопировать.')
     }[output];
     $('#project-path').textContent = state.settings.project;
@@ -270,7 +298,7 @@ function renderLinuxAccess() {
     const text = {
         missing: t('Установите правило USB для донгла и PDM Probe, затем переподключите плату.'),
         outdated: t('Обновите правило USB для доступа к PDM Probe и переподключите плату.'),
-        configured: state.hid ? t('Правило USB для донгла и PDM Probe установлено. Донгл подключён.')
+        configured: state.hid ? t('Правило USB для VibeMic и PDM Probe установлено. VibeMic подключён.')
             : t('Правило USB для донгла и PDM Probe установлено. Переподключите нужную плату.'),
         overridden: t('Действующее правило 70-vibemic.rules отличается от правила VibeMic. Проверьте настройки udev.')
     }[status] ?? '';
@@ -310,7 +338,7 @@ function updateModels() {
         card.querySelector('p').textContent = status.damaged
             ? status.downloading ? t('Проверим контрольную сумму перед заменой.')
                 : t('Локальный файл не прошёл проверку. Скачайте проверенную копию.')
-            : id === 'small' ? t('Больше точности для русской речи и технических терминов.') : t('Меньше места и быстрее на слабом компьютере.');
+            : t('Локальное распознавание на 25 языках, включая русский и английский. Язык определяется автоматически.');
         card.querySelector('.tag').textContent = status.downloading ? t('ЗАГРУЗКА') : status.damaged ? t('ПОВРЕЖДЕНА')
             : status.installed ? (chosen ? t('ВЫБРАНА') : t('УСТАНОВЛЕНА')) : t(modelSizes[id]);
         const progress = card.querySelector('progress');
@@ -423,6 +451,7 @@ async function importProfile() {
     const details = [
         [t('Код радиопары'), profile.pairCode || t('Стендовый адрес')],
         [t('Модель'), modelNames[profile.model]],
+        [t('Режим диктовки'), label('#dictation-mode', profile.dictationMode)],
         [t('Язык'), label('#language', profile.language)],
         [t('Агент'), agentNames[profile.agent]],
         [t('Место вставки'), label('#output', output)],
@@ -469,6 +498,7 @@ function updateVolumes() {
 }
 
 function updateSelectedVolume() {
+    $('#battery-sensor-hint').hidden = $('#board-role').value !== 'transmitter-v2-battery';
     const volume = state.volumes.find(entry => entry.directory === $('#volume').value);
     $('#flash-firmware').disabled = flashing || savingPair || Boolean(pdmProbe) || !volume;
     $('#flash-firmware').ariaBusy = String(flashing);
@@ -514,7 +544,7 @@ async function flash() {
     const volume = state.volumes.find(entry => entry.directory === directory);
     if (!volume || flashing || savingPair || pdmProbe) return;
     const pairCode = state.settings.pairCode;
-    const label = { transmitter: t('Передатчик'), receiver: t('USB-донгл'), 'mic-probe': 'PDM Probe' }[role];
+    const label = { transmitter: t('Передатчик'), 'transmitter-v2-battery': t('Передатчик · nice!nano v2'), receiver: t('USB-донгл'), 'mic-probe': 'PDM Probe' }[role];
     const backup = volume.hasCurrent ? t('Перед записью VibeMic сохранит резервную копию.') : t('На диске отсутствует CURRENT.UF2. Резервная копия недоступна.');
     const address = role === 'mic-probe' ? t('В режиме диагностики запись идёт по USB. После проверки выберите обычный передатчик.')
         : pairCode ? t`В прошивку будет записан код пары ${pairCode}.` : t('В прошивке будет использован стендовый адрес.');
@@ -565,7 +595,7 @@ async function refreshMics(request = false) {
     state.inputs = devices;
     updateMicrophones();
     const input = selectedInput();
-    if (!state.fixture) setStandby(state.hid && input && isVibeMicInput(input) ? input.deviceId : undefined);
+    if (!state.fixture) setStandby(state.settings.dictationMode !== 'auto' && state.hid && input && isVibeMicInput(input) ? input.deviceId : undefined);
     render();
 }
 
@@ -578,21 +608,49 @@ function updateMicrophones() {
         ...devices.map((device, index) => new Option(device.label || t`Аудиовход ${index + 1}`, device.deviceId)));
     if (selected && !input) menu.add(new Option(t('Недоступный вход'), selected));
     menu.value = selected;
-    $('#mic-status').textContent = input ? t('VibeMic использует этот вход для диктовки.')
+    $('#mic-status').textContent = input && !selected && input.label ? t`Диктовка использует ${input.label}.`
+        : input ? t('VibeMic использует этот вход для диктовки.')
         : selected ? t('Выбранный вход недоступен. Подключите его или выберите другой.')
             : devices.some(device => device.label) ? t('Выберите микрофон из списка.')
                 : t('Нажмите «Найти микрофоны» и разрешите доступ.');
 }
 
-function setHidConnected(connected) {
+function setHidConnected(connected, transport = 'radio') {
+    const changed = state.hid && connected && state.pttTransport !== transport;
     state.hid = connected;
-    if (!connected) {
+    state.pttTransport = connected ? transport : undefined;
+    if (!connected || changed) {
+        state.battery = null;
+        api.cancelApproval().catch(() => {});
+        api.cancelNativeDictation().catch(() => {});
         setStandby();
-        stopLinkCheck(t('Донгл отключился. Подключите его и повторите проверку.'), 'error');
+        if (!connected || linkCheck) {
+            stopLinkCheck(t('Подключение VibeMic изменилось. Повторите проверку.'), 'error');
+        }
         release('hardware', true);
     }
     render();
     refreshMics().catch(() => {});
+}
+
+function updateBattery(value) {
+    state.battery = value ? { ...value, at: Date.now() } : null;
+    renderBattery();
+}
+
+function renderBattery() {
+    const element = $('#transmitter-battery');
+    element.hidden = !state.hid;
+    const value = state.battery;
+    const stale = !value || Date.now() - value.at > 30000;
+    element.dataset.low = String(!stale && value.percent !== null && value.percent <= 15);
+    element.textContent = stale ? t('Батарея: —') : value.usbPower ? t('Питание USB')
+        : value.percent === null ? t('Батарея: —') : t`Батарея ≈ ${value.percent}%`;
+    element.title = stale ? t('Нет свежих данных батареи передатчика. Нужна прошивка с телеметрией.')
+        : value.usbPower ? t('Передатчик получает питание по USB. Процент и состояние зарядки не определяются.')
+            : value.percent === null ? t('Напряжение батареи недоступно. Проверьте тип платы и настройку датчика в прошивке.')
+                : t`Батарея передатчика: ${value.millivolts} мВ. Процент приблизительный, по напряжению LiPo.`;
+    element.setAttribute('aria-label', element.textContent + '. ' + element.title);
 }
 
 async function connectHid() {
@@ -608,7 +666,7 @@ function renderLinkCheck() {
     const toggle = $('#link-check-toggle');
     const status = $('#link-check-status');
     const text = linkCheck?.message ?? linkCheckResult?.message ?? (state.hid
-        ? t('Нажмите «Начать проверку», затем говорите, удерживая PTT.') : t('Подключите USB-донгл.'));
+        ? t('Нажмите «Начать проверку», затем говорите, удерживая PTT.') : t('Подключите микрофон по USB или подключите донгл.'));
     if (status.textContent !== t(text)) status.textContent = t(text);
     status.dataset.result = linkCheckResult?.kind ?? '';
     toggle.textContent = linkCheck ? t('Отменить') : t('Начать проверку');
@@ -722,14 +780,14 @@ async function startLinkCheck() {
     if (linkCheck || pdmProbe || !state.hid || state.recording || state.processing) return;
     clearLinkPreview();
     linkCheckResult = undefined;
-    const check = { stage: 'preparing', message: t('Открываем USB-вход донгла…') };
+    const check = { stage: 'preparing', message: t('Открываем аудиовход VibeMic…') };
     linkCheck = check;
     render();
     check.timeout = setTimeout(() => stopLinkCheck(t('USB-вход не открылся. Проверьте доступ к микрофону.'), 'error'), 20000);
     try {
-        const devices = state.fixture ? [{ deviceId: 'fixture-mic', label: 'PTT Dictation Mic' }] : await microphones();
+        const devices = state.fixture ? reviewInputs : await microphones();
         if (linkCheck !== check) return;
-        const dedicated = devices.filter(isVibeMicInput);
+        const dedicated = pttInputs(devices, state.pttTransport);
         const input = dedicated.find(device => device.deviceId === state.settings.microphone)
             ?? (dedicated.length === 1 ? dedicated[0] : undefined);
         if (!input) throw new Error(t('Не удалось выбрать PTT Dictation Mic. Проверьте аудиовход на странице «Распознавание».'));
@@ -747,8 +805,13 @@ async function startLinkCheck() {
 }
 
 async function handlePtt(down, stats) {
+    if (down) api.cancelApproval().catch(() => {});
     const check = linkCheck;
-    if (!check) return down ? begin('hardware') : release('hardware');
+    if (!check) {
+        if (down) return begin('hardware');
+        if (state.recording?.trigger === 'hardware') state.recording.endReason = stats?.end;
+        return release('hardware');
+    }
     if (down && check.stage === 'ready') {
         clearTimeout(check.timeout);
         check.stage = 'recording';
@@ -771,7 +834,7 @@ async function handlePtt(down, stats) {
             if (interruption) {
                 stopLinkCheck(t`${interruption} Прослушайте сохранённую часть записи.`, 'error', stats);
             } else {
-                stopLinkCheck(t('Нажатие и отпускание PTT получены. Прослушайте запись с донгла.'), 'success', stats);
+                stopLinkCheck(t('Нажатие и отпускание PTT получены. Прослушайте запись.'), 'success', stats);
             }
         } catch (error) {
             if (linkCheck === check) {
@@ -785,7 +848,8 @@ async function handlePtt(down, stats) {
 function begin(trigger) {
     if (linkCheck || pdmProbe || state.recording || state.waiting) return;
     const model = state.models[state.settings.model];
-    if (!model?.installed) {
+    const automatic = trigger === 'hardware' && state.settings.dictationMode === 'auto';
+    if (!automatic && !model?.installed) {
         if (model?.damaged && trigger === 'manual') {
             go('speech');
             $(`[data-model="${state.settings.model}"]`).scrollIntoView({ block: 'nearest' });
@@ -796,7 +860,8 @@ function begin(trigger) {
         return;
     }
     const selected = state.settings.microphone;
-    const input = standby?.input?.ready && (!selected || selected === standby.deviceId) ? standby.input : null;
+    const resolved = selected || selectedInput()?.deviceId;
+    const input = standby?.input?.ready && resolved === standby.deviceId ? standby.input : null;
     const previousId = state.processing?.id;
     const take = {
         id: ++nextTakeId,
@@ -804,17 +869,10 @@ function begin(trigger) {
         model: state.settings.model,
         language: state.settings.language,
         trigger, terminal: state.settings.output === 'terminal' ? state.terminal?.id : null,
-        external: !state.processing && trigger === 'hardware' && state.settings.output === 'desktop' && state.settings.autoInsert
-            ? api.prepareExternal().then(id => ({ id }), error => ({ error })) : null,
-        pending: state.fixture ? Promise.resolve({
-            finish: async () => {
-                const wave = new Uint8Array(4000);
-                wave[0] = previousId ? 1 : 0;
-                return wave;
-            },
-            cancel: async () => {}
-        }) : input ? Promise.resolve().then(() => input.begin()) : startCapture(selected)
+        automatic,
+        insertExternal: !state.processing && trigger === 'hardware' && state.settings.output === 'desktop' && state.settings.autoInsert
     };
+    take.pending = captureTake(take, selected, input);
     state.recording = take;
     take.timeout = setTimeout(() => release(trigger), 119000);
     take.pending.catch(error => {
@@ -827,6 +885,71 @@ function begin(trigger) {
         }
     });
     render();
+}
+
+async function captureTake(take, selected, input) {
+    if (take.automatic) {
+        const route = await api.beginNativeDictation();
+        if (route.native) {
+            let stopShortcut;
+            let localFallback = false;
+            try {
+                if (route.shortcut === 'codex') {
+                    if (state.recording === take) stopShortcut = await ptt?.holdShortcut('codex');
+                    if (!stopShortcut) throw new Error(t('Нажмите и удерживайте PTT.'));
+                } else if (route.shortcut === 'claude' && state.recording === take) {
+                    // An older board cannot send Cmd+D; the recorder button still works in that case.
+                    stopShortcut = await ptt?.holdShortcut('claude', route.usage).catch(() => null);
+                    // Give the physical shortcut time to start Claude before using its mic button.
+                    if (stopShortcut) await new Promise(resolve => setTimeout(resolve, 350));
+                    if (state.recording === take && await api.checkClaudeDictation(route.session, false)) {
+                        await new Promise(resolve => setTimeout(resolve, 600));
+                        if (state.recording === take && await api.checkClaudeDictation(route.session, true)) {
+                            await stopShortcut?.();
+                            localFallback = true;
+                        }
+                    }
+                }
+            } catch (error) {
+                if (route.shortcut === 'claude') {
+                    await stopShortcut?.().catch(() => {});
+                    await api.cancelNativeDictation().catch(() => {});
+                }
+                throw error;
+            }
+            if (!localFallback) {
+                clearTimeout(take.timeout);
+                take.native = route.app;
+                if (state.recording === take) render();
+                return {
+                    finish: async () => {
+                        await stopShortcut?.();
+                        if (route.shortcut !== 'codex') await api.endNativeDictation(route.session);
+                        const interruption = linkEndMessages[take.endReason];
+                        if (interruption) throw new Error(t(interruption));
+                        return { native: true, app: route.app };
+                    },
+                    cancel: async () => {
+                        try { await stopShortcut?.(); }
+                        finally { if (route.shortcut !== 'codex') await api.cancelNativeDictation(); }
+                    }
+                };
+            }
+            if (state.recording !== take) throw new Error(t(linkEndMessages.hostTimeout));
+        }
+    }
+    if (!state.models[take.model]?.installed) throw new Error(t('Сначала скачайте модель на странице «Распознавание».'));
+    take.external = take.insertExternal
+        ? api.prepareExternal().then(id => ({ id }), error => ({ error })) : null;
+    if (state.fixture) return {
+        finish: async () => {
+            const wave = new Uint8Array(4000);
+            wave[0] = take.previousId ? 1 : 0;
+            return wave;
+        },
+        cancel: async () => {}
+    };
+    return input ? input.begin() : startCapture(selected, { transport: state.pttTransport });
 }
 
 async function release(trigger, cancel = false) {
@@ -858,6 +981,10 @@ async function recognizeTake(take) {
     try {
         const { wave, error: captureError } = await take.wave;
         if (captureError) throw captureError;
+        if (wave.native) {
+            notify(t`Диктовка завершена в ${wave.app}. Проверьте текст в приложении.`);
+            return;
+        }
         const text = await api.transcribe(wave, take.model, take.language);
         if (!text) throw new Error(t('Речь не распознана.'));
         const inserted = !take.previousId && state.settings.autoInsert && state.settings.output === 'terminal' &&
@@ -870,7 +997,7 @@ async function recognizeTake(take) {
                 await api.pasteExternal(id, text);
                 externalInserted = true;
             } catch (error) {
-                notify(t('Черновик сохранён в VibeMic. ') + (error.message || error), true);
+                notify(t('Черновик сохранён в VibeMic. ') + errorDetail(error.message || error), true);
             }
         }
         const status = inserted
@@ -969,6 +1096,7 @@ bind('#pdm-restore', () => choosePdmRole('transmitter'));
 bind('#pdm-save', async () => { if (pdmWav && await api.savePdmClip(pdmWav)) notify(t('Запись PDM сохранена.')); });
 bind('#refresh-volumes', refreshVolumes);
 bind('#volume', updateSelectedVolume, 'change');
+bind('#board-role', updateSelectedVolume, 'change');
 bind('#choose-volume', async () => {
     const picked = await api.pickVolume();
     if (!picked) return;
@@ -1028,6 +1156,9 @@ bind('#microphone', async event => {
 }, 'change');
 bind('#language', event => save({ language: event.target.value }), 'change');
 bind('#ui-language', event => save({ uiLanguage: event.target.value }), 'change');
+bind('#dictation-mode', event => save({ dictationMode: event.target.value }), 'change');
+bind('#codex-dictation-shortcut', event => save({ codexDictationShortcut: event.target.checked }), 'change');
+bind('#claude-dictation-shortcut', event => save({ claudeDictationShortcut: event.target.checked }), 'change');
 bind('#choose-project', async () => { state.settings = await api.chooseProject(); render(); });
 bind('#agent', event => save({ agent: event.target.value }), 'change');
 bind('#output', event => save({ output: event.target.value }), 'change');
@@ -1102,24 +1233,33 @@ try {
     await refreshVolumes();
     await refreshMics().catch(() => {});
     if (!state.fixture) navigator.mediaDevices?.addEventListener('devicechange', () => refreshMics().catch(() => {}));
-    if (!initial.runtime) notify(t('Движок Whisper отсутствует в этой сборке.'), true);
+    if (!initial.runtime) notify(t('Движок Parakeet отсутствует в этой сборке.'), true);
     if (!state.fixture && navigator.hid) {
         ptt = watchPtt(navigator.hid, {
             connection: setHidConnected,
             button: handlePtt,
+            battery: updateBattery,
+            approval: (kind, token, at) => {
+                if (!linkCheck && !pdmProbe && !state.recording && !state.processing && !state.waiting) {
+                    api.approvalEdge(kind, token, at).catch(() => {});
+                }
+            },
             error: failure => notify(failure.message || String(failure), true)
         });
         await ptt.scan();
+        setInterval(renderBattery, 5000);
     }
     if (state.fixture) {
         window.fixture = {
             go, connectHid, begin, release, handlePtt,
+            updateBattery,
             flash, openTerminal,
             setMicrophones(devices = fixtureInputs) {
                 reviewInputs = devices;
                 return refreshMics();
             },
             disconnectHid: () => setHidConnected(false),
+            connectWired: () => setHidConnected(true, 'usb'),
             setUsbRule(status) {
                 state.usbRule = status;
                 renderLinuxAccess();

@@ -49,12 +49,29 @@ bool vm_decode(const uint8_t *wire, size_t size, struct vm_header *header)
 		}
 		break;
 	case VM_PTT_DOWN:
+	case VM_APPROVAL_ARM:
+	case VM_APPROVAL_COMMIT:
 		if (timestamp != 0) {
 			return false;
 		}
 		/* fall through */
 	case VM_PTT_UP:
 		if (size != VM_HEADER_BYTES) {
+			return false;
+		}
+		break;
+	case VM_BATTERY_STATUS:
+		if (size != VM_BATTERY_BYTES || timestamp != 0 || sequence != 0 ||
+		    get_le(wire + 8, 4) != 0 || wire[15] != 0 ||
+		    (wire[14] & ~(VM_BATTERY_VALID | VM_BATTERY_USB_POWER)) != 0) {
+			return false;
+		}
+		if (wire[14] & VM_BATTERY_VALID) {
+			uint32_t mv = get_le(wire + 12, 2);
+			if (mv < 2800u || mv > 4350u) {
+				return false;
+			}
+		} else if (get_le(wire + 12, 2) != 0) {
 			return false;
 		}
 		break;
@@ -73,6 +90,20 @@ bool vm_decode(const uint8_t *wire, size_t size, struct vm_header *header)
 		.session = get_le(wire + 8, 4),
 	};
 	return true;
+}
+
+void vm_encode_battery(uint8_t *wire, const struct vm_battery *battery)
+{
+	vm_encode(wire, VM_BATTERY_STATUS, 0, 0, NULL);
+	put_le(wire + 12, battery->millivolts, 2);
+	wire[14] = battery->flags;
+	wire[15] = 0;
+}
+
+void vm_decode_battery(const uint8_t *wire, struct vm_battery *battery)
+{
+	battery->millivolts = (uint16_t)get_le(wire + 12, 2);
+	battery->flags = wire[14];
 }
 
 void vm_decode_pcm(const uint8_t *wire, int16_t *pcm)

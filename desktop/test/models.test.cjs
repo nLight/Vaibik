@@ -17,26 +17,26 @@ test('startup distinguishes a missing, truncated, and same-size damaged model', 
     const { models } = await fixture(t);
     const missing = { installed: false, damaged: false, downloading: false };
     const damaged = { installed: false, damaged: true, downloading: false };
-    assert.deepEqual((await models.statuses()).base, missing);
-    await assert.rejects(models.verify('base'), /Сначала установите/);
+    assert.deepEqual((await models.statuses()).parakeet, missing);
+    await assert.rejects(models.verify('parakeet'), /Сначала установите/);
 
-    const file = models.file('base');
+    const file = models.file('parakeet');
     await fs.writeFile(file, 'incomplete');
-    assert.deepEqual((await models.statuses()).base, damaged);
-    await fs.truncate(file, MODELS.base.size);
-    assert.deepEqual((await models.statuses()).base, damaged);
-    await assert.rejects(models.verify('base'), /повреждён/);
+    assert.deepEqual((await models.statuses()).parakeet, damaged);
+    await fs.truncate(file, MODELS.parakeet.size);
+    assert.deepEqual((await models.statuses()).parakeet, damaged);
+    await assert.rejects(models.verify('parakeet'), /повреждён/);
 });
 
 test('a failed replacement leaves the previous model file and removes the temporary download', async t => {
     const { directory, models } = await fixture(t);
-    const file = models.file('base');
+    const file = models.file('parakeet');
     const existing = Buffer.from('existing local model');
     await fs.writeFile(file, existing);
     t.mock.method(globalThis, 'fetch', async () => new Response('incomplete replacement'));
 
-    await assert.rejects(models.install('base', () => {}), /Контрольная сумма/);
+    await assert.rejects(models.install('parakeet', () => {}), /Контрольная сумма/);
     assert.deepEqual(await fs.readFile(file), existing);
-    assert.deepEqual(await fs.readdir(directory), [MODELS.base.file]);
-    assert.equal((await models.statuses()).base.downloading, false);
+    assert.deepEqual(await fs.readdir(directory), [MODELS.parakeet.file]);
+    assert.equal((await models.statuses()).parakeet.downloading, false);
 });

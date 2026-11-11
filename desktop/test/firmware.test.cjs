@@ -54,6 +54,8 @@ test('loader verification rejects a different board or incompatible flash map', 
     assert.equal((await inspectBootloader(volume)).address, 0x26000);
     await report('nRF52840-nicenano', 'SoftDevice: S140 version 6.1.1\r\nDate: Jun 19 2021');
     assert.equal((await inspectBootloader(volume)).address, 0x26000);
+    await report('nRF52840-nicenano-v2', 'SoftDevice: S140 6.1.1');
+    assert.equal((await inspectBootloader(volume)).address, 0x26000);
     await report('nRF52840-nicenano', 'SoftDevice: S140 7.3.0');
     assert.equal((await inspectBootloader(volume)).address, 0x27000);
     await report('nRF52840-nicenano');
@@ -210,5 +212,22 @@ test('custom pairing refuses absent, ambiguous or misplaced slots before writing
         await assert.rejects(flashFirmware(volume, 'receiver', root, identity, backups, '8B27-3DE4'), /слота для кода пары/);
         await assert.rejects(fs.access(path.join(volume, 'VIBEMIC.UF2')), { code: 'ENOENT' });
         await assert.rejects(fs.access(backups), { code: 'ENOENT' });
+    }
+});
+
+test('nice!nano v2 battery firmware is an explicit role with both flash maps', async t => {
+    const { volume, images, report, backups } = await fixture(t);
+    for (const [version, start] of [[6, 0x26000], [7, 0x27000]]) {
+        await report('nRF52840-nicenano', `SoftDevice: S140 ${version}.0.0`);
+        const image = block(start);
+        pairTemplate.copy(image, 64);
+        const name = FILES['transmitter-v2-battery'].replace('.uf2', version === 7 ? '-s140v7.uf2' : '.uf2');
+        await fs.writeFile(path.join(images, name), image);
+        const loader = await inspectBootloader(volume);
+        await flashFirmware(volume, 'transmitter-v2-battery', path.dirname(images), loader.identity, backups, '8B27-3DE4');
+        const written = await fs.readFile(path.join(volume, 'VIBEMIC.UF2'));
+        assert.equal(written.readUInt32LE(12), start);
+        assert.ok(written.includes(Buffer.from('8B273DE4', 'hex')));
+        await fs.unlink(path.join(volume, 'VIBEMIC.UF2'));
     }
 });

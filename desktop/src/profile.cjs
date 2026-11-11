@@ -10,19 +10,23 @@ const { normalizePairCode } = require('./firmware.cjs');
 
 const LANGUAGES = Object.freeze(['auto', 'ru', 'en', 'de']);
 const OUTPUTS = Object.freeze(['terminal', 'desktop', 'manual']);
+const DICTATION_MODES = Object.freeze(['local', 'auto']);
 const format = 'vibemic-profile';
 const version = 1;
 const limit = 16 * 1024;
 
 function portableSettings(value) {
-    if (!value || typeof value.model !== 'string' || !Object.hasOwn(MODELS, value.model) ||
+    if (!value || typeof value.model !== 'string' ||
+        (!Object.hasOwn(MODELS, value.model) && !['base', 'small'].includes(value.model)) ||
         typeof value.agent !== 'string' || !Object.hasOwn(AGENTS, value.agent) ||
         !LANGUAGES.includes(value.language) || !OUTPUTS.includes(value.output) ||
-        typeof value.autoInsert !== 'boolean' || typeof value.pairCode !== 'string') {
+        typeof value.autoInsert !== 'boolean' || typeof value.pairCode !== 'string' ||
+        (value.dictationMode !== undefined && !DICTATION_MODES.includes(value.dictationMode))) {
         throw new Error('В профиле указаны неподдерживаемые настройки.');
     }
-    const { model, language, agent, output, autoInsert } = value;
-    return { model, language, agent, output, autoInsert, pairCode: normalizePairCode(value.pairCode) };
+    const { agent, output, autoInsert } = value;
+    return { model: 'parakeet', language: 'auto', agent, output, autoInsert,
+        dictationMode: value.dictationMode ?? 'local', pairCode: normalizePairCode(value.pairCode) };
 }
 
 function parseProfile(contents) {
@@ -71,4 +75,4 @@ async function writeProfile(file, settings, configPath) {
     } finally { await fs.rm(temporary, { force: true }).catch(() => {}); }
 }
 
-module.exports = { LANGUAGES, OUTPUTS, portableSettings, readProfile, writeProfile };
+module.exports = { LANGUAGES, OUTPUTS, DICTATION_MODES, portableSettings, readProfile, writeProfile };

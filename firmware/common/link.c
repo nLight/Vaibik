@@ -25,6 +25,9 @@ int vm_radio_init(enum esb_mode mode, esb_event_handler handler)
 	}
 	config.mode = mode;
 	config.event_handler = handler;
+	if (mode == ESB_MODE_PTX) {
+		config.tx_output_power = 8;
+	}
 	config.retransmit_count = 2;
 	config.retransmit_delay = 900;
 	err = esb_init(&config);

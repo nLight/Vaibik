@@ -12,9 +12,12 @@ const { SpeechModels, MODELS } = require('./models.cjs');
 const { findBootloaders, inspectBootloader, flashFirmware, normalizePairCode, generatePairCode } = require('./firmware.cjs');
 const { AGENTS, agentSpec, agentEnvironment, findAgent, installAgent } = require('./agents.cjs');
 const { ExternalDraft } = require('./external-draft.cjs');
-const { LANGUAGES, OUTPUTS, portableSettings, readProfile, writeProfile } = require('./profile.cjs');
+const { ApprovalGesture } = require('./approval.cjs');
+const { NativeDictation } = require('./native-dictation.cjs');
+const { OUTPUTS, DICTATION_MODES, portableSettings, readProfile, writeProfile } = require('./profile.cjs');
 const { usbRuleBody, usbRuleStatus, installUsbRule } = require('./usb-access.cjs');
 const localization = import('../ui/i18n.mjs');
+const pttDevices = import('../ui/ptt-hid.mjs');
 let t = source => source;
 let setLanguage;
 
@@ -29,6 +32,8 @@ let window;
 let tray;
 let models;
 let external;
+let approval;
+let nativeDictation;
 let settings;
 let configPath;
 let writeConfig = Promise.resolve();
@@ -39,7 +44,7 @@ let savingPair = false;
 const installing = new Set();
 
 const defaults = () => ({
-    model: 'small', language: 'auto', microphone: '', agent: 'codex',
+    model: 'parakeet', language: 'auto', microphone: '', agent: 'codex', dictationMode: 'local',
     uiLanguage: app.getLocale().toLowerCase().startsWith('ru') ? 'ru' : 'en',
     project: app.getPath('home'), autoInsert: true, output: 'terminal', agentPaths: { codex: '', claude: '' }
 });
@@ -59,7 +64,11 @@ function validSettings(value) {
     try { pairCode = normalizePairCode(value.pairCode ?? ''); } catch {}
     return {
         model: Object.hasOwn(MODELS, value.model) ? value.model : initial.model,
-        language: LANGUAGES.includes(value.language) ? value.language : initial.language,
+        language: 'auto',
+        dictationMode: process.platform === 'darwin' && DICTATION_MODES.includes(value.dictationMode)
+            ? value.dictationMode : 'local',
+        codexDictationShortcut: process.platform === 'darwin' && value.codexDictationShortcut === true,
+        claudeDictationShortcut: process.platform === 'darwin' && value.claudeDictationShortcut === true,
         uiLanguage: ['ru', 'en'].includes(value.uiLanguage) ? value.uiLanguage : initial.uiLanguage,
         microphone: typeof value.microphone === 'string' ? value.microphone.slice(0, 1024) : '',
         agent: Object.hasOwn(AGENTS, value.agent) ? value.agent : initial.agent,
@@ -83,6 +92,8 @@ function persist(update) {
             await fs.rename(temporary, configPath);
         }
         settings = next;
+        if (settings.dictationMode === 'auto') nativeDictation?.enable();
+        else nativeDictation?.dispose();
         setLanguage(settings.uiLanguage);
         updateTrayMenu();
         return next;
@@ -111,10 +122,6 @@ function emit(channel, data) {
     if (window && !window.isDestroyed()) window.webContents.send(channel, data);
 }
 
-function deviceMatches(device) {
-    return device && device.vendorId === 0x1209 && device.productId === 0x0003;
-}
-
 function probeMatches(device) {
     return Number.parseInt(device?.vendorId, 16) === 0x1209 && Number.parseInt(device?.productId, 16) === 0x0002;
 }
@@ -140,7 +147,8 @@ async function linuxUsbRuleStatus(rule) {
     return 'missing';
 }
 
-function configurePermissions() {
+async function configurePermissions() {
+    const { preferredPttDevice, isPttDevice } = await pttDevices;
     const ses = session.defaultSession;
     ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) =>
         (requestingOrigin === origin || requestingOrigin === origin + '/') && (permission === 'hid' || permission === 'serial' ||
@@ -150,13 +158,12 @@ function configurePermissions() {
             (permission === 'hid' || permission === 'serial' || (permission === 'media' &&
                 details.mediaTypes?.every(type => type === 'audio')))));
     ses.setDevicePermissionHandler(details => details.origin === origin &&
-        ((details.deviceType === 'hid' && deviceMatches(details.device)) ||
+        ((details.deviceType === 'hid' && Boolean(isPttDevice(details.device))) ||
             (details.deviceType === 'serial' && probeMatches(details.device))));
     ses.on('select-hid-device', (event, details, choose) => {
         event.preventDefault();
-        const matches = details.deviceList.filter(deviceMatches);
-        choose(details.frame === window?.webContents.mainFrame && matches.length === 1
-            ? matches[0].deviceId : '');
+        const device = preferredPttDevice(details.deviceList.filter(isPttDevice));
+        choose(details.frame === window?.webContents.mainFrame ? device?.deviceId ?? '' : '');
     });
     ses.on('select-serial-port', (event, ports, wc, choose) => {
         event.preventDefault();
@@ -183,11 +190,12 @@ function registerHandlers() {
     const profileFilters = () => [{ name: t('Профиль VibeMic'), extensions: ['json'] }];
     handle('app:init', async () => ({ settings, version: app.getVersion(), platform: process.platform, fixture, external: external.supported,
         usbRule: process.platform !== 'linux' ? null : fixture ? 'missing' : await linuxUsbRuleStatus(await packagedUsbRule()),
-        models: fixture ? { small: { installed: true }, base: { installed: false } } : await models.statuses(),
+        models: fixture ? { parakeet: { installed: true } } : await models.statuses(),
         agents: await agentStatus(), runtime: fixture || await fs.access(runtime()).then(() => true, () => false) }));
     handle('settings:save', async patch => {
         if (!patch || typeof patch !== 'object') throw new Error(t('Некорректные настройки.'));
-        const allowed = ['model', 'language', 'uiLanguage', 'microphone', 'agent', 'autoInsert', 'output'];
+        const allowed = ['model', 'language', 'uiLanguage', 'microphone', 'agent', 'autoInsert', 'output',
+            'dictationMode', 'codexDictationShortcut', 'claudeDictationShortcut'];
         return persist(current => ({ ...current, ...Object.fromEntries(Object.entries(patch)
             .filter(([key]) => allowed.includes(key))) }));
     });
@@ -254,7 +262,7 @@ function registerHandlers() {
         } finally { installing.delete(id); }
     });
     handle('model:status', () => fixture
-        ? { small: { installed: true }, base: { installed: false } } : models.statuses());
+        ? { parakeet: { installed: true } } : models.statuses());
     handle('model:install', id => {
         if (fixture) throw new Error(t('В тестовом режиме загрузка отключена.'));
         return models.install(id, value => emit('model:progress', value));
@@ -418,10 +426,25 @@ function registerHandlers() {
     });
     handle('draft:permissions', () => fixture || process.platform !== 'darwin' ||
         systemPreferences.isTrustedAccessibilityClient(true));
+    handle('approval:edge', (kind, token, at) => approval?.edge(kind, token, at));
+    handle('approval:cancel', () => approval?.cancel());
+    handle('dictation:begin', () => fixture || !nativeDictation || settings.dictationMode !== 'auto'
+        ? { native: false } : nativeDictation.begin({
+            shortcut: settings.codexDictationShortcut, claudeShortcut: settings.claudeDictationShortcut
+        }));
+    handle('dictation:end', session => {
+        if (!Number.isSafeInteger(session) || session <= 0) throw new Error(t('Сессия диктовки изменилась.'));
+        return fixture ? { native: true } : nativeDictation?.finish(session);
+    });
+    handle('dictation:check-claude', (session, abandon) => {
+        if (!Number.isSafeInteger(session) || session <= 0) throw new Error(t('Сессия диктовки изменилась.'));
+        return nativeDictation?.checkClaude(session, abandon === true);
+    });
+    handle('dictation:cancel', () => nativeDictation?.cancel());
 }
 
 function runtime() {
-    return path.join(resources, 'engine', process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli');
+    return path.join(resources, 'engine', 'nemo', 'bin', process.platform === 'win32' ? 'nemo-speech.exe' : 'nemo-speech');
 }
 
 function createWindow() {
@@ -474,6 +497,11 @@ else app.whenReady().then(async () => {
     setLanguage(settings.uiLanguage);
     models = new SpeechModels(path.join(data, 'models'), runtime());
     external = new ExternalDraft(resources);
+    if (!fixture && process.platform === 'darwin') {
+        approval = new ApprovalGesture(path.join(resources, 'engine', 'vibemic-desktop-draft'));
+        nativeDictation = new NativeDictation(path.join(resources, 'engine', 'vibemic-desktop-draft'));
+        if (settings.dictationMode === 'auto') nativeDictation.enable();
+    }
     const extra = {
         '/xterm.js': 'node_modules/@xterm/xterm/lib/xterm.js',
         '/xterm.css': 'node_modules/@xterm/xterm/css/xterm.css',
@@ -482,12 +510,12 @@ else app.whenReady().then(async () => {
     protocol.handle('vibemic', request => {
         const url = new URL(request.url);
         const allowed = ['/index.html', '/styles.css', '/renderer.js', '/audio.js', '/capture-worklet.js', '/ptt-hid.mjs',
-            '/pcm.mjs', '/pdm-probe.mjs', '/i18n.mjs', '/translations.mjs'];
+            '/pcm.mjs', '/pdm-probe.mjs', '/battery.mjs', '/i18n.mjs', '/translations.mjs'];
         const resource = extra[url.pathname] || (allowed.includes(url.pathname) ? 'ui' + url.pathname : null);
         if (url.host !== 'app' || !resource) return new Response('', { status: 404 });
         return net.fetch(pathToFileURL(path.join(root, resource)).href);
     });
-    configurePermissions();
+    await configurePermissions();
     registerHandlers();
     createWindow();
     createTray();
@@ -506,5 +534,7 @@ app.on('before-quit', () => {
     app.quitting = true;
     if (terminal) stopTerminal(terminal.id);
     external?.cancel();
+    approval?.cancel();
+    nativeDictation?.dispose();
 });
 app.on('window-all-closed', () => { if (fixture || process.platform === 'linux') app.quit(); });
