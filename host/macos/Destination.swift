@@ -112,6 +112,7 @@ struct Destination {
     let title: String?
     let field: AXUIElement
     let pane: TmuxPane?
+    private let bundleIdentifier: String?
 
     static func focused() throws -> Destination {
         let focusError = BridgeError("Focus the input field in the target app before holding PTT.")
@@ -149,7 +150,7 @@ struct Destination {
         let pane = terminal ? try? TmuxPane.active() : nil
         return Destination(pid: app.processIdentifier, window: window,
                            title: pane == nil ? attribute(window, kAXTitleAttribute) as? String : nil,
-                           field: field, pane: pane)
+                           field: field, pane: pane, bundleIdentifier: app.bundleIdentifier)
     }
 
     private func checkFocus() throws {
@@ -181,7 +182,8 @@ struct Destination {
         let literal = literalInput(text)
         guard !literal.isEmpty else { return }
         var writable: DarwinBoolean = false
-        if !isWebEditor(),
+        // Use one insertion path for Telegram's custom editor.
+        if bundleIdentifier != "ru.keepcoder.Telegram", !isWebEditor(),
            AXUIElementIsAttributeSettable(field, kAXSelectedTextAttribute as CFString, &writable)
             == .success, writable.boolValue,
            AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, literal as CFString)
