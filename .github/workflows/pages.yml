@@ -2,24 +2,47 @@ name: Deploy GitHub Pages
 on:
   push:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'release' && 'pages-release' || 'pages' }}
   cancel-in-progress: false
 jobs:
+  refresh-after-release:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Request Pages deployment from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
   build:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pages: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
       - uses: actions/configure-pages@v5
+      - name: Render published download links
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/vaibik-releases.json"
+          cp -R site "$RUNNER_TEMP/vaibik-pages"
+          node script/render_pages.mjs "$RUNNER_TEMP/vaibik-releases.json" "$RUNNER_TEMP/vaibik-pages/index.html"
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: site
+          path: ${{ runner.temp }}/vaibik-pages
   deploy:
     needs: build
     runs-on: ubuntu-latest
