@@ -1,0 +1,68 @@
+name: Retry macOS ARM runner allocation
+
+on:
+  workflow_run:
+    workflows: [Build Vaibik]
+    branches: [main]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: retry-arm-runner-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    name: Retry ARM job if no runner was assigned
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.run_attempt == 1 &&
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'cancelled')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+    steps:
+      - name: Check runner allocation and request one retry
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          repo="repos/$GITHUB_REPOSITORY"
+          arm_job=$(gh api "$repo/actions/runs/$RUN_ID/attempts/1/jobs" --paginate --jq '
+            .jobs[] | select(.name == "Package macOS (arm64)" and .conclusion == "cancelled"
+              and (.runner_id // 0) == 0 and (.steps | length) == 0)
+            | [.id, (.check_run_url | split("/") | last)] | @tsv')
+          if [[ -z "$arm_job" ]]; then
+            echo "No cancelled ARM job without an assigned runner."
+            exit 0
+          fi
+          read -r job_id check_id <<< "$arm_job"
+
+          runner_error=$(gh api "$repo/check-runs/$check_id/annotations" --paginate --jq '
+            .[] | select(.annotation_level == "failure"
+              and .message == "The job was not acquired by Runner of type hosted even after multiple attempts")
+            | .message')
+          if [[ -z "$runner_error" ]]; then
+            echo "GitHub did not report a runner allocation failure."
+            exit 0
+          fi
+
+          # The completed event can arrive after a manual retry or a newer push.
+          retryable_run=$(gh api "$repo/actions/runs/$RUN_ID" --jq '
+            select(.run_attempt == 1 and .status == "completed") | .id')
+          main_sha=$(gh api "$repo/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$retryable_run" != "$RUN_ID" || "$main_sha" != "$RUN_SHA" ]]; then
+            echo "The run has been retried or superseded."
+            exit 0
+          fi
+
+          gh api --method POST "$repo/actions/jobs/$job_id/rerun" --silent
+          echo "Requested a second attempt for ARM job $job_id in run $RUN_ID."
