@@ -449,7 +449,8 @@ function runtime() {
 
 function createWindow() {
     window = new BrowserWindow({
-        width: 1140, height: 780, minWidth: 740, minHeight: 600, backgroundColor: '#13151a',
+        width: 680, height: 528, minWidth: 520, minHeight: 450, backgroundColor: '#000000',
+        ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 18 } } : {}),
         title: 'VibeMic', show: false, autoHideMenuBar: true,
         webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
             nodeIntegration: false, sandbox: true, backgroundThrottling: false,

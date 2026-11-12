@@ -9,12 +9,10 @@ const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const iconPaths = {
     wave: '<path d="M2 12h4l3-7 4 14 3-9 2 2h4"/>',
-    grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-    chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><rect x="10" y="10" width="4" height="4" rx=".7"/>',
     terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/>',
-    sliders: '<path d="M4 6h7m4 0h5M4 12h3m4 0h9M4 18h11m4 0h1M11 3v6m-4 0v6m8 0v6"/>',
+    gear: '<path d="M9.5 3h5l.6 2.6 2.3 1.3 2.6-.8 2.5 4.3-2 1.8v2.6l2 1.8-2.5 4.3-2.6-.8-2.3 1.3-.6 2.6h-5l-.6-2.6-2.3-1.3-2.6.8-2.5-4.3 2-1.8v-2.6l-2-1.8 2.5-4.3 2.6.8 2.3-1.3z" transform="translate(2 1) scale(.83)"/><circle cx="12" cy="12.2" r="2.8"/>',
+    back: '<path d="M20 12H4m6-6-6 6 6 6"/>',
     lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3m-4 4v3"/>',
-    chevron: '<path d="m9 6 6 6-6 6"/>',
     mic: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-3 0h6"/>',
     usb: '<path d="M12 22V3m-3 4 3-4 3 4M12 18l-5-4v-3m5 5 5-4V9"/><circle cx="7" cy="9" r="2"/><rect x="15.5" y="6" width="3" height="3"/>',
     copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
@@ -32,7 +30,6 @@ function icons(root = document) {
     });
 }
 
-const pageNames = { overview: 'Обзор', hardware: 'Платы', speech: 'Распознавание', agents: 'Агенты', settings: 'Настройки' };
 const agentNames = { codex: 'Codex', claude: 'Claude Code' };
 const modelNames = { parakeet: 'Parakeet TDT v3' };
 const modelSizes = { parakeet: '714 МБ' };
@@ -96,15 +93,21 @@ function go(page) {
         renderLinkCheck();
     }
     state.page = page;
+    const inSettings = page !== 'overview';
+    $('#open-settings').hidden = inSettings;
+    $('#close-settings').hidden = !inSettings;
+    $('.settings-nav').hidden = !inSettings;
     $$('[data-view]').forEach(view => { view.hidden = view.dataset.view !== page; });
-    $$('[data-page]').forEach(nav => {
-        const selected = nav.dataset.page === page;
+    $$('[data-section]').forEach(nav => {
+        const selected = nav.dataset.section === page;
         nav.classList.toggle('selected', selected);
         nav.setAttribute('aria-current', selected ? 'page' : 'false');
     });
-    $('#current-page').textContent = t(pageNames[page]);
     $('#scroll-area').scrollTop = 0;
-    if (page === 'agents' && state.terminal) requestAnimationFrame(() => state.terminal?.fit.fit());
+    (inSettings ? $(`[data-section="${page}"]`) : $('#open-settings')).focus({ preventScroll: true });
+    if (page === 'agents' && state.terminal) requestAnimationFrame(() => {
+        if (state.page === 'agents') state.terminal?.fit.fit();
+    });
 }
 
 async function save(patch) {
@@ -120,7 +123,6 @@ function applyUiLanguage() {
     setLanguage(state.settings.uiLanguage);
     localizeStatic();
     $('#ui-language').value = state.settings.uiLanguage;
-    $('#current-page').textContent = t(pageNames[state.page]);
     for (const draft of drafts) draft.status = t(draft.status);
     $('#draft-state').textContent = t($('#draft-state').textContent);
     $('#notification-text').textContent = t($('#notification-text').textContent);
@@ -144,9 +146,9 @@ function recordingGuide(input, model) {
         title: t('Выберите микрофон'),
         hint: state.settings.microphone ? t('Выбранный вход недоступен. Подключите его или выберите другой.')
             : t('Для пробной записи подойдёт микрофон компьютера.'),
-        action: t('Настроить микрофон'), target: '#refresh-mics', showBoards: !state.hid
+        action: t('Настроить микрофон'), target: '#refresh-mics'
     };
-    if (model?.installed || state.settings.dictationMode === 'auto') return null;
+    if (model?.installed || (state.hid && state.settings.dictationMode === 'auto')) return null;
     if (Object.values(state.models).some(status => status.downloading)) return {
         title: t('Загружается модель'), hint: t('Пробная запись станет доступна после установки.'),
         action: t('Открыть загрузку'), target: '#local-models'
@@ -171,49 +173,38 @@ function render() {
     renderBattery();
     const deviceStatus = state.pttTransport === 'usb' ? t('Микрофон подключён по USB') : t('Донгл подключён');
     const model = state.models[state.settings.model];
-    const agent = agentNames[state.settings.agent];
     const output = state.settings.output;
-    $('#dictation-label').textContent = state.settings.dictationMode === 'auto'
-        ? t('Автоматическая диктовка') : t('Локальное распознавание');
     const input = selectedInput();
     const status = state.recording ? 'recording' : state.processing ? 'processing' : 'idle';
     const guide = status === 'idle' ? recordingGuide(input, model) : null;
-    const hero = $('.hero');
-    hero.dataset.state = status;
-    hero.toggleAttribute('data-guide', Boolean(guide));
-    $('.guide-actions').hidden = !guide;
-    $('#guide-boards').hidden = !guide?.showBoards;
+    const panel = $('.capture-panel');
+    panel.dataset.state = status;
+    panel.toggleAttribute('data-setup', Boolean(guide));
+    $('#guide-next').hidden = !guide;
     if (guide) {
         $('#guide-next').textContent = guide.action;
         $('#guide-next').dataset.target = guide.target;
     }
     $('#device-pill').classList.toggle('live', device);
-    $('#device-pill').replaceChildren(Object.assign(document.createElement('span'), { className: 'dot' }),
-        document.createTextNode(device ? deviceStatus : t('VibeMic не подключён')));
-    $('#capture-status').textContent = { idle: guide ? t('Настройка записи') : t('Ожидание PTT'), recording: t('Идёт запись'), processing: t('Распознавание') }[status];
-    $('#capture-title').textContent = { idle: guide?.title ?? t('Нажмите и говорите'),
-        recording: state.recording?.native ? t`Диктовка в ${state.recording.native}` : t('Говорите'),
-        processing: t('Готовим черновик') }[status];
-    $('#capture-hint').textContent = { idle: guide?.hint ?? (device && input && isVibeMicInput(input)
+    $('#device-label').textContent = device ? deviceStatus : t('VibeMic не подключён');
+    $('#capture-status').textContent = { idle: guide?.title ?? t('Готов к записи'),
+        recording: state.recording?.native ? t`Диктовка в ${state.recording.native}` : t('Идёт запись'),
+        processing: t('Распознавание') }[status];
+    const hint = { idle: guide?.hint ?? (device && ((input && isVibeMicInput(input)) || state.settings.dictationMode === 'auto')
         ? t('Удерживайте кнопку на передатчике до конца фразы.') : t('Удерживайте экранную кнопку, пока говорите.')),
         recording: state.processing ? t('Предыдущая фраза распознаётся. Отпустите PTT в конце.')
             : t('Отпустите кнопку, когда закончите фразу.'),
-        processing: state.waiting ? t('Следующая фраза записана и ждёт распознавания.')
-            : t('Можно диктовать следующую фразу.') }[status];
-    $('#manual-ptt').hidden = Boolean(guide);
+        processing: state.waiting ? t('Следующая фраза записана и ждёт распознавания.') : '' }[status];
+    $('#capture-hint').textContent = hint;
+    $('#capture-hint').hidden = !hint;
+    $('#manual-ptt').hidden = Boolean(guide || !model?.installed);
     $('#manual-ptt').disabled = Boolean(state.waiting || linkCheck || pdmProbe || !input);
-    $('#ready-device').textContent = !device ? t('Подключите USB')
+    $('#ready-device').textContent = !device ? t('Подключите передатчик по USB или используйте донгл.')
         : standby?.input?.ready || (state.fixture && !standby) || (state.settings.dictationMode === 'auto' && input) ? t('Готов к записи')
             : standby ? t('Подготовка аудиовхода') : t('Проверьте аудиовход');
-    $('#ready-model').textContent = model?.installed ? t`${modelNames[state.settings.model]} готова`
-        : model?.downloading ? t('Модель загружается') : model?.damaged ? t('Перескачайте модель') : t('Установите модель');
     const desktopOutput = state.platform === 'darwin' ? t('Активное приложение') : t('Открытый Claude или Codex');
     $('#output option[value=desktop]').textContent = desktopOutput;
-    $('#ready-agent').textContent = output === 'manual' ? t('Черновик в VibeMic')
-        : output === 'desktop' ? desktopOutput
-        : state.terminal ? t`${agentNames[state.terminal.agent]} · сессия открыта`
-            : `${agent} · ${state.agents[state.settings.agent]?.path ? t('откройте терминал') : t('установите CLI')}`;
-    $('#connect-hid').textContent = device ? deviceStatus : t('Подключить VibeMic');
+    $('#connect-hid-label').textContent = device ? deviceStatus : t('Подключить VibeMic');
     $('#connect-hid').disabled = device;
     renderLinuxAccess();
     renderLinkCheck();
@@ -255,9 +246,11 @@ function render() {
 
 function updateDraft() {
     const text = $('#draft-text').value;
-    $('#draft-count').textContent = t`${text.length} симв.`;
-    $('#copy-draft').disabled = !text.trim();
-    $('#insert-draft').disabled = !text.trim() || !state.terminal;
+    const empty = !text.trim();
+    $('#draft-state').hidden = empty || !$('#draft-state').textContent;
+    $('#copy-draft').disabled = empty;
+    $('#insert-draft').hidden = !state.terminal;
+    $('#insert-draft').disabled = empty || !state.terminal;
 }
 
 function rememberDraftEdits() {
@@ -643,14 +636,18 @@ function renderBattery() {
     element.hidden = !state.hid;
     const value = state.battery;
     const stale = !value || Date.now() - value.at > 30000;
-    element.dataset.low = String(!stale && value.percent !== null && value.percent <= 15);
-    element.textContent = stale ? t('Батарея: —') : value.usbPower ? t('Питание USB')
-        : value.percent === null ? t('Батарея: —') : t`Батарея ≈ ${value.percent}%`;
+    const powered = !stale && value.usbPower;
+    const percent = stale ? null : value.percent;
+    element.dataset.low = String(percent !== null && percent <= 15);
+    element.dataset.powered = String(powered);
+    element.style.setProperty('--battery-fill', `${percent ?? 0}%`);
+    $('#battery-label').textContent = powered ? t('Питание USB') : percent === null ? '—' : `≈ ${percent}%`;
     element.title = stale ? t('Нет свежих данных батареи передатчика. Нужна прошивка с телеметрией.')
         : value.usbPower ? t('Передатчик получает питание по USB. Процент и состояние зарядки не определяются.')
             : value.percent === null ? t('Напряжение батареи недоступно. Проверьте тип платы и настройку датчика в прошивке.')
                 : t`Батарея передатчика: ${value.millivolts} мВ. Процент приблизительный, по напряжению LiPo.`;
-    element.setAttribute('aria-label', element.textContent + '. ' + element.title);
+    const summary = powered ? t('Питание USB') : percent === null ? t('Батарея: —') : t`Батарея ≈ ${percent}%`;
+    element.setAttribute('aria-label', summary + '. ' + element.title);
 }
 
 async function connectHid() {
@@ -1005,7 +1002,7 @@ async function recognizeTake(take) {
             : externalInserted ? t('Вставлено в открытое приложение. Проверьте и отправьте текст там.')
                 : take.previousId ? t('Фраза сохранена для отдельной вставки.') : t('Готов к проверке и вставке.');
         publishDraft(take, text, status);
-        if (inserted) notify(t('Черновик вставлен в терминал.'));
+        if (inserted && state.page !== 'overview') notify(t('Черновик вставлен в терминал.'));
     } catch (error) {
         state.models = await api.modelStatus().catch(() => state.models);
         notify(error.message || String(error), true);
@@ -1035,7 +1032,7 @@ async function openTerminal() {
     $('#terminal-wrap').hidden = false;
     const view = new window.Terminal({
         fontSize: 12, fontFamily: 'Menlo, Consolas, monospace', cursorBlink: true,
-        theme: { background: '#111319', foreground: '#e3e3ef', cursor: '#c1b3ff' }
+        theme: { background: '#000000', foreground: '#f1f1f1', cursor: '#ff9a4d' }
     });
     const fit = new window.FitAddon.FitAddon();
     view.loadAddon(fit);
@@ -1058,17 +1055,18 @@ function closeTerminal() {
 }
 
 icons();
-$$('[data-page]').forEach(button => button.addEventListener('click', () => go(button.dataset.page)));
-$$('[data-go]').forEach(button => button.addEventListener('click', () => go(button.dataset.go)));
+$$('[data-page], [data-section]').forEach(button => {
+    button.addEventListener('click', () => go(button.dataset.page ?? button.dataset.section));
+});
+window.addEventListener('keydown', event => {
+    if (!(event.metaKey || event.ctrlKey) || event.code !== 'Comma' || $('dialog').open) return;
+    event.preventDefault();
+    if (state.page === 'overview') go('settings');
+});
 bind('#guide-next', event => {
     go('speech');
-    focusControl(event.currentTarget.dataset.target);
-});
-bind('#ready-output', () => {
-    go('agents');
-    if (state.settings.output !== 'terminal') focusControl('#output');
-    else if (state.terminal) $('#terminal-wrap').scrollIntoView({ block: 'nearest' });
-    else if (state.agents[state.settings.agent]?.path) focusControl('#choose-project', '#session-card');
+    const target = event.currentTarget.dataset.target;
+    focusControl(target, target === '#local-models' ? '#model-list' : target);
 });
 bind('#dismiss', () => { $('#notification').hidden = true; });
 bind('#import-profile', () => transferProfile(importProfile));
@@ -1085,8 +1083,10 @@ bind('#copy-draft', async () => { await api.copy($('#draft-text').value); notify
 bind('#insert-draft', () => {
     if (!pasteDraft()) throw new Error(t('Агент ещё не готов принять вставку. Можно скопировать черновик.'));
     $('#draft-state').textContent = t('Вставлено в поле ввода агента.');
+    updateDraft();
     go('agents');
     state.terminal?.view.focus();
+    $('#terminal-wrap').scrollIntoView({ block: 'nearest' });
 });
 bind('#connect-hid', connectHid);
 bind('#link-check-toggle', () => linkCheck ? stopLinkCheck(t('Проверка отменена.')) : startLinkCheck());
@@ -1224,6 +1224,7 @@ window.addEventListener('resize', () => {
 try {
     const initial = await api.init();
     Object.assign(state, initial);
+    document.body.classList.toggle('mac', initial.platform === 'darwin');
     $('.version').textContent = 'VibeMic ' + initial.version;
     $('#pair-code').value = state.settings.pairCode;
     applyUiLanguage();
@@ -1278,8 +1279,13 @@ try {
             },
             terminalText() {
                 const buffer = state.terminal?.view.buffer.active;
-                return Array.from({ length: buffer?.length || 0 },
-                    (_, i) => buffer.getLine(i)?.translateToString(true)).join('\n');
+                let text = '';
+                for (let index = 0; index < (buffer?.length ?? 0); index++) {
+                    const line = buffer.getLine(index);
+                    if (index && !line.isWrapped) text += '\n';
+                    text += line.translateToString(!buffer.getLine(index + 1)?.isWrapped);
+                }
+                return text;
             },
             setModelStatus(id, status, progress = 0) {
                 state.models[id] = status;
