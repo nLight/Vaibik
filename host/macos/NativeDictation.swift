@@ -43,25 +43,7 @@ private struct NativeRecording {
     ]
 
     static func button(in root: AXUIElement, labels: Set<String>) -> AXUIElement? {
-        var queue: [(AXUIElement, Int)] = [(root, 0)]
-        var index = 0
-        while index < queue.count && index < 160 {
-            let (element, depth) = queue[index]
-            index += 1
-            let role = attribute(element, kAXRoleAttribute) as? String
-            let isButton = role == kAXButtonRole || (role == kAXCheckBoxRole &&
-                attribute(element, kAXSubroleAttribute) as? String == "AXToggleButton")
-            if isButton && attribute(element, kAXEnabledAttribute) as? Bool != false {
-                let title = attribute(element, kAXTitleAttribute) as? String ?? ""
-                let description = attribute(element, kAXDescriptionAttribute) as? String ?? ""
-                if labels.contains(title) || labels.contains(description) { return element }
-            }
-            if depth < 6 && role != "AXWebArea",
-               let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
-                queue.append(contentsOf: children.prefix(160 - min(queue.count, 160)).map { ($0, depth + 1) })
-            }
-        }
-        return nil
+        enabledButton(in: root, labels: labels, includeToggles: true)
     }
 
     static func begin(id: Int, claudeShortcut: Bool) -> NativeRecording? {

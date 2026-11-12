@@ -18,6 +18,29 @@ func axElement(_ element: AXUIElement, _ name: String) -> AXUIElement? {
     return (value as! AXUIElement)
 }
 
+func enabledButton(in root: AXUIElement, labels: Set<String>, includeToggles: Bool = false) -> AXUIElement? {
+    var queue: [(AXUIElement, Int)] = [(root, 0)]
+    var index = 0
+    let limit = 160
+    while index < queue.count {
+        let (element, depth) = queue[index]
+        index += 1
+        let role = attribute(element, kAXRoleAttribute) as? String
+        let isButton = role == kAXButtonRole || (includeToggles && role == kAXCheckBoxRole &&
+            attribute(element, kAXSubroleAttribute) as? String == "AXToggleButton")
+        if isButton && attribute(element, kAXEnabledAttribute) as? Bool != false {
+            let title = attribute(element, kAXTitleAttribute) as? String ?? ""
+            let description = attribute(element, kAXDescriptionAttribute) as? String ?? ""
+            if labels.contains(title) || labels.contains(description) { return element }
+        }
+        if depth < 6 && role != "AXWebArea" && queue.count < limit,
+           let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
+            queue.append(contentsOf: children.prefix(limit - queue.count).map { ($0, depth + 1) })
+        }
+    }
+    return nil
+}
+
 private func literalInput(_ text: String) -> String {
     // A focused editor can be a terminal, where pasted line breaks may submit commands.
     let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")

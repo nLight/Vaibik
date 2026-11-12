@@ -8,8 +8,11 @@ struct ApprovalTarget {
     private let field: AXUIElement
     private let document: URL
     private let text: String
+    private let chatGPTComposer: Bool
 
     private static let lifetime = 0.7
+    private static let chatGPTEditorLabels: Set<String> = ["Ask ChatGPT", "Спросить ChatGPT"]
+    private static let sendLabels: Set<String> = ["Send", "Отправить"]
 
     static func focused() -> ApprovalTarget? {
         guard let app = NSWorkspace.shared.frontmostApplication,
@@ -18,23 +21,41 @@ struct ApprovalTarget {
         guard supports(app) else { return nil }
         let element = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(element, 0.15)
-        guard let window = axElement(element, kAXFocusedWindowAttribute),
-              let field = axElement(element, kAXFocusedUIElementAttribute),
+        guard let field = axElement(element, kAXFocusedUIElementAttribute)
+                ?? axElement(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute) else { return nil }
+        var fieldPID: pid_t = 0
+        guard AXUIElementGetPid(field, &fieldPID) == .success, fieldPID == pid,
+              let window = axElement(element, kAXFocusedWindowAttribute)
+                ?? axElement(field, kAXWindowAttribute),
               attribute(field, kAXEnabledAttribute) as? Bool != false,
-              attribute(field, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole,
-              attribute(field, kAXSelectedTextRangeAttribute) != nil,
+              attribute(field, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole else { return nil }
+        let role = attribute(field, kAXRoleAttribute) as? String
+        let chatGPTComposer = bundle == "com.openai.codex" &&
+            (role == kAXTextAreaRole || role == kAXTextFieldRole) &&
+            [kAXTitleAttribute, kAXDescriptionAttribute, kAXPlaceholderValueAttribute].contains { name in
+                guard let label = attribute(field, name) as? String else { return false }
+                return chatGPTEditorLabels.contains(label)
+            }
+        guard chatGPTComposer || attribute(field, kAXSelectedTextRangeAttribute) != nil,
               let text = attribute(field, kAXValueAttribute) as? String,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let document = documentContaining(field, in: window, bundle: bundle) else { return nil }
-        return ApprovalTarget(pid: pid, window: window, field: field, document: document, text: text)
+        return ApprovalTarget(pid: pid, window: window, field: field, document: document, text: text,
+                              chatGPTComposer: chatGPTComposer)
     }
 
     func submit(before deadline: TimeInterval) -> Bool {
+        let send = chatGPTComposer ? chatGPTSendButton(before: deadline) : nil
         guard ProcessInfo.processInfo.systemUptime < deadline,
               let current = Self.focused(), current.pid == pid, current.document == document,
               CFEqual(current.window, window), CFEqual(current.field, field), current.text == text,
+              current.chatGPTComposer == chatGPTComposer,
               ProcessInfo.processInfo.systemUptime < deadline,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+        if chatGPTComposer {
+            guard let send else { return false }
+            return AXUIElementPerformAction(send, kAXPressAction as CFString) == .success
+        }
         guard let source = CGEventSource(stateID: .privateState),
               let down = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false) else {
@@ -46,6 +67,19 @@ struct ApprovalTarget {
         }
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
         return true
+    }
+
+    private func chatGPTSendButton(before deadline: TimeInterval) -> AXUIElement? {
+        var composer = field
+        for _ in 0..<7 {
+            guard ProcessInfo.processInfo.systemUptime < deadline,
+                  let parent = axElement(composer, kAXParentAttribute),
+                  !CFEqual(parent, window),
+                  attribute(parent, kAXRoleAttribute) as? String != "AXWebArea" else { return nil }
+            composer = parent
+            if let button = enabledButton(in: composer, labels: Self.sendLabels) { return button }
+        }
+        return nil
     }
 
     static func run() {
@@ -86,9 +120,7 @@ struct ApprovalTarget {
     static func documentContaining(_ field: AXUIElement, in window: AXUIElement, bundle: String) -> URL? {
         var element = field
         var document: URL?
-        // Claude Code's composer can sit more than 32 accessibility nodes below its window.
-        let maximumDepth = bundle == "com.anthropic.claudefordesktop" ? 64 : 32
-        for _ in 0..<maximumDepth {
+        for _ in 0..<64 {
             if CFEqual(element, window) { return document }
             if attribute(element, kAXRoleAttribute) as? String == "AXWebArea" {
                 // Keep submission in the app's own editor, outside nested browser views.
