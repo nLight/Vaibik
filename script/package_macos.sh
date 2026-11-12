@@ -23,6 +23,10 @@ identity=-
 if "$distribution"; then
   profile=${VIBEMIC_MAC_NOTARY_PROFILE:-}
   [[ -n "$profile" ]] || fail 'Set VIBEMIC_MAC_NOTARY_PROFILE to a notarytool keychain profile.'
+  notary_args=(--keychain-profile "$profile")
+  if [[ -n "${VIBEMIC_MAC_NOTARY_KEYCHAIN:-}" ]]; then
+    notary_args+=(--keychain "$VIBEMIC_MAC_NOTARY_KEYCHAIN")
+  fi
 fi
 if "$signed"; then
   requested=$(printf '%s' "${VIBEMIC_MAC_SIGNING_SHA1:-}" | tr '[:lower:]' '[:upper:]')
@@ -118,18 +122,23 @@ JS
   fi
   if "$distribution"; then
     receipt="$stage/notary-$arch.json"
-    if ! xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait --output-format json > "$receipt"; then
+    submit_status=0
+    xcrun notarytool submit "$dmg" "${notary_args[@]}" --wait --timeout 30m --output-format json > "$receipt" || submit_status=$?
+    status=$(/usr/bin/plutil -extract status raw -o - "$receipt" 2>/dev/null || true)
+    if [[ "$submit_status" != 0 || "$status" != Accepted ]]; then
       cat "$receipt" >&2
+      if [[ "$status" == Invalid || "$status" == Rejected ]]; then
+        if submission_id=$(/usr/bin/plutil -extract id raw -o - "$receipt" 2>/dev/null); then
+          xcrun notarytool log "$submission_id" "${notary_args[@]}" >&2 || true
+        fi
+      fi
       fail 'The notarization request failed.'
     fi
-    status=$(/usr/bin/plutil -extract status raw -o - "$receipt")
-    if [[ "$status" != Accepted ]]; then
-      cat "$receipt" >&2
-      fail 'Apple did not accept the disk image.'
-    fi
+    cat "$receipt"
     xcrun stapler staple "$dmg"
     xcrun stapler validate "$dmg"
-    spctl --assess --type open --context context:primary-signature "$dmg"
+    /usr/bin/codesign --verify --strict "$dmg"
+    spctl --assess --verbose=2 --type open --context context:primary-signature "$dmg"
   fi
   mv -f -- "$dmg" "$destination/"
   printf 'Verified %s/%s\n' "$destination" "${dmg##*/}"

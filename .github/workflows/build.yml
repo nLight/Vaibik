@@ -10,6 +10,10 @@ on:
         description: Build signed DMGs from main and save them as workflow artifacts
         type: boolean
         default: false
+      verify_notarization:
+        description: Build and notarize both DMGs from main without publishing a release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -85,9 +89,10 @@ jobs:
     name: Package macOS (${{ matrix.arch }})
     needs: firmware
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
-      SIGN_DEVELOPER_ID: ${{ (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.verify_developer_id)) && 'true' || 'false' }}
+      SIGN_DEVELOPER_ID: ${{ (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.verify_developer_id || inputs.verify_notarization))) && 'true' || 'false' }}
+      NOTARIZE_MACOS: ${{ (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.verify_notarization)) && 'true' || 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -115,16 +120,27 @@ jobs:
           BUILD_ARCH: ${{ matrix.arch }}
           CERTIFICATE_P12: ${{ env.SIGN_DEVELOPER_ID == 'true' && secrets.MACOS_CERTIFICATE_P12 || '' }}
           CERTIFICATE_PASSWORD: ${{ env.SIGN_DEVELOPER_ID == 'true' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          NOTARY_KEY_P8: ${{ env.NOTARIZE_MACOS == 'true' && secrets.APPLE_NOTARY_KEY_P8 || '' }}
+          NOTARY_KEY_ID: ${{ env.NOTARIZE_MACOS == 'true' && secrets.APPLE_NOTARY_KEY_ID || '' }}
+          NOTARY_ISSUER_ID: ${{ env.NOTARIZE_MACOS == 'true' && secrets.APPLE_NOTARY_ISSUER_ID || '' }}
         run: |
           flags=()
           output=build/source-release/macos
           signature='ad hoc'
+          notarization='not requested'
+          if [[ "$NOTARIZE_MACOS" == true &&
+            ( -z "$NOTARY_KEY_P8" || -z "$NOTARY_KEY_ID" || -z "$NOTARY_ISSUER_ID" ) ]]; then
+            echo "::error::Set APPLE_NOTARY_KEY_P8, APPLE_NOTARY_KEY_ID, and APPLE_NOTARY_ISSUER_ID."
+            exit 1
+          fi
           if [[ "$SIGN_DEVELOPER_ID" == true ]]; then
             if [[ -z "$CERTIFICATE_P12" || -z "$CERTIFICATE_PASSWORD" ]]; then
               echo "::error::Set both macOS signing secrets."
               exit 1
             fi
+            umask 077
             signing_dir=$(mktemp -d "$RUNNER_TEMP/vaibik-signing.XXXXXX")
+            umask 022
             keychain="$signing_dir/signing.keychain-db"
             keychain_password=$(openssl rand -hex 24)
             trap 'security delete-keychain "$keychain" 2>/dev/null || true; rm -rf -- "$signing_dir"' EXIT
@@ -140,12 +156,25 @@ jobs:
             output=build/source-release/macos-signed
             signature='Developer ID'
           fi
-          unset CERTIFICATE_P12 CERTIFICATE_PASSWORD
+          if [[ "$NOTARIZE_MACOS" == true ]]; then
+            notary_key="$signing_dir/notary.p8"
+            (umask 077; printf '%s\n' "$NOTARY_KEY_P8" > "$notary_key")
+            export VIBEMIC_MAC_NOTARY_PROFILE=vaibik-ci
+            export VIBEMIC_MAC_NOTARY_KEYCHAIN="$keychain"
+            xcrun notarytool store-credentials "$VIBEMIC_MAC_NOTARY_PROFILE" \
+              --key "$notary_key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+              --keychain "$keychain" --validate
+            flags=(--distribution)
+            output=build/source-release/macos-distribution
+            notarization='Accepted'
+          fi
+          unset CERTIFICATE_P12 CERTIFICATE_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID
           ./script/package_macos.sh "${flags[@]}" "$BUILD_ARCH"
           version=$(node -p 'require("./desktop/package.json").version')
           mkdir -p build/ci/macos
           cp "$output/VibeMic-$version-$BUILD_ARCH.dmg" build/ci/macos/
           printf '%s\n' "$signature" > "build/ci/macos/signing-$BUILD_ARCH.txt"
+          printf '%s\n' "$notarization" > "build/ci/macos/notarization-$BUILD_ARCH.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-${{ matrix.arch }}
@@ -196,9 +225,11 @@ jobs:
           test -s "release/VibeMic-$version-x64.dmg"
           grep -qx 'Developer ID' release/signing-arm64.txt
           grep -qx 'Developer ID' release/signing-x64.txt
+          grep -qx 'Accepted' release/notarization-arm64.txt
+          grep -qx 'Accepted' release/notarization-x64.txt
           cat > release/notes.md <<EOF
           $marker
-          - macOS 13.3+: arm64 for Apple Silicon and x64 for Intel. Signed with Developer ID. Apple notarization is pending.
+          - macOS 13.3+: arm64 for Apple Silicon and x64 for Intel. Both DMGs are signed with Developer ID and notarized by Apple.
           - Match S140 v6 or v7 to the SoftDevice version in \`INFO_UF2.TXT\`. Use the battery-enabled image on a confirmed nice!nano v2.
           EOF
           if [[ -z "$previous" ]]; then
