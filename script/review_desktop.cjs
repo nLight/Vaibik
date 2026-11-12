@@ -21,12 +21,12 @@ module.exports = async (window, directory) => {
     }
     await waitFor('Boolean(window.fixture)');
     await exec("fixture.setMicrophones([]); fixture.setModelStatus('parakeet', { installed: false }); true");
-    await waitFor("document.querySelector('#capture-title').textContent === 'Выберите микрофон'");
+    await waitFor("document.querySelector('#capture-status').textContent === 'Выберите микрофон'");
     await save('56-setup-new-profile');
-    window.setContentSize(740, 615);
+    window.setContentSize(520, 450);
     await save('57-setup-compact');
-    await exec("document.querySelector('#guide-boards').click(); true");
-    await waitFor("document.querySelector('#current-page').textContent === 'Платы'");
+    await exec("document.querySelector('#device-pill').click(); true");
+    await waitFor("document.querySelector('[data-section=hardware]').getAttribute('aria-current') === 'page'");
     await exec("fixture.go('overview'); document.querySelector('#guide-next').click(); true");
     await waitFor("document.activeElement.id === 'refresh-mics'");
     await save('58-setup-microphone-permission');
@@ -34,13 +34,16 @@ module.exports = async (window, directory) => {
     await exec("document.querySelector('#microphone').value = 'test-mic'; document.querySelector('#microphone').dispatchEvent(new Event('change')); true");
     await waitFor("vibemic.init().then(value => value.settings.microphone === 'test-mic')");
     await exec("fixture.go('overview'); true");
-    await waitFor("document.querySelector('#capture-title').textContent === 'Установите Parakeet'");
+    await waitFor("document.querySelector('#capture-status').textContent === 'Установите Parakeet'");
     await save('59-setup-needs-parakeet');
     await exec("document.querySelector('#guide-next').click(); true");
     await waitFor("document.activeElement.id === 'local-models'");
+    if (!await exec("document.querySelector('[data-model=parakeet] .actions').getBoundingClientRect().bottom <= innerHeight")) {
+        throw new Error('The model guide did not reveal the download controls');
+    }
     await save('60-setup-parakeet-options');
     await exec("fixture.go('overview'); fixture.setModelStatus('parakeet', { downloading: true }, 38); true");
-    await waitFor("document.querySelector('#capture-title').textContent === 'Загружается модель'");
+    await waitFor("document.querySelector('#capture-status').textContent === 'Загружается модель'");
     await save('61-setup-downloading');
     await exec("document.querySelector('#guide-next').click(); true");
     await waitFor("document.activeElement.id === 'local-models' && !document.querySelector('[data-model=parakeet] progress').hidden");
@@ -48,12 +51,18 @@ module.exports = async (window, directory) => {
     await exec("fixture.go('overview'); fixture.setModelStatus('parakeet', { installed: true }); true");
     await waitFor("!document.querySelector('#manual-ptt').hidden && document.querySelector('#capture-hint').textContent.includes('экранную кнопку')");
     await save('62-setup-trial-ready');
-    await exec("document.querySelector('#ready-output').click(); true");
-    await waitFor("document.activeElement.id === 'choose-project'");
-    if (!await exec("document.querySelector('#start-terminal').getBoundingClientRect().bottom <= innerHeight")) {
-        throw new Error('Project guidance did not reveal the terminal launch button');
+    await exec("document.querySelector('#open-settings').click(); true");
+    await waitFor("document.activeElement.dataset.section === 'settings'");
+    await save('63-settings-entry');
+    for (const section of ['agents', 'speech', 'hardware']) {
+        await exec(`document.querySelector('[data-section=${section}]').click(); true`);
+        await waitFor(`!document.querySelector('[data-view=${section}]').hidden && document.activeElement.dataset.section === '${section}'`);
+        await save('63-settings-compact-' + section);
     }
-    await save('63-setup-project');
+    await exec("document.querySelector('#close-settings').click(); true");
+    await waitFor("document.activeElement.id === 'open-settings' && document.querySelector('.settings-nav').hidden");
+    await exec("window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Comma', ctrlKey: true })); true");
+    await waitFor("!document.querySelector('[data-view=settings]').hidden");
     await exec("fixture.go('overview'); fixture.setMicrophones([]); true");
     await waitFor("document.querySelector('#capture-hint').textContent.includes('Выбранный вход недоступен')");
     await save('64-setup-input-disconnected');
@@ -66,8 +75,20 @@ module.exports = async (window, directory) => {
     await waitFor("vibemic.init().then(value => value.settings.microphone === '')");
     await exec("fixture.go('overview'); true");
     await waitFor("!document.querySelector('#manual-ptt').hidden");
-    window.setContentSize(1140, 780);
+    window.setContentSize(680, 528);
+    await exec('document.activeElement.blur()');
     await save('01-overview');
+    const { nativeTheme } = require('electron');
+    const theme = nativeTheme.themeSource;
+    try {
+        for (const source of ['light', 'dark']) {
+            nativeTheme.themeSource = source;
+            await save('01-overview-system-' + source);
+        }
+    } finally {
+        nativeTheme.themeSource = theme;
+    }
+    window.setContentSize(1140, 780);
     await exec("fixture.go('hardware')");
     await save('02-hardware');
     if (!await exec("document.querySelector('#flash-firmware').getBoundingClientRect().bottom < innerHeight")) {
@@ -108,23 +129,37 @@ module.exports = async (window, directory) => {
     await exec('fixture.openTerminal()');
     await waitFor("document.querySelector('#terminal .xterm')");
     await save('09-terminal');
-    await exec("fixture.go('hardware'); fixture.connectHid(); fixture.go('overview'); fixture.begin('manual'); true");
-    await waitFor("document.querySelector('.hero').dataset.state === 'recording'");
+    window.setContentSize(680, 528);
+    await exec(`fixture.go('hardware'); fixture.connectHid(); fixture.go('overview');
+        document.activeElement.blur(); document.querySelector('#manual-ptt').dispatchEvent(new KeyboardEvent('keydown', { key: ' ' })); true`);
+    await waitFor("document.querySelector('.capture-panel').dataset.state === 'recording'");
     await save('10-recording');
-    await exec("fixture.release('manual'); true");
-    await waitFor("document.querySelector('.hero').dataset.state === 'processing'");
+    await exec("document.querySelector('#manual-ptt').dispatchEvent(new KeyboardEvent('keyup', { key: ' ' })); true");
+    await waitFor("document.querySelector('.capture-panel').dataset.state === 'processing'");
     await save('11-processing');
     await waitFor("document.querySelector('#draft-text').value.includes('parser.ts')");
     await save('12-draft');
+    await exec("fixture.updateBattery({ percent: 68, millivolts: 3940, usbPower: false }); true");
+    await waitFor("document.querySelector('#battery-label').textContent.includes('68%')");
+    await save('12b-draft-battery');
+    await exec("fixture.updateBattery({ percent: 12, millivolts: 3620, usbPower: false }); true");
+    await waitFor("document.querySelector('#transmitter-battery').dataset.low === 'true'");
+    await save('12c-draft-low-battery');
+    await exec("fixture.updateBattery({ percent: null, millivolts: null, usbPower: true }); true");
+    await waitFor("document.querySelector('#transmitter-battery').dataset.powered === 'true'");
+    await save('12d-draft-usb-power');
+    await exec("fixture.updateBattery(null); true");
     await exec("fixture.notify('В записи тишина. Проверьте выбранный микрофон.', true)");
     await save('13-error');
     await exec("document.querySelector('#dismiss').click(); true");
-    window.setContentSize(740, 615);
+    window.setContentSize(520, 450);
     await save('14-compact');
     const overflowing = await exec("document.querySelector('main').scrollWidth > document.querySelector('main').clientWidth");
     if (overflowing) throw new Error('Horizontal overflow on the compact layout');
     const draftVisible = await exec("document.querySelector('#copy-draft').getBoundingClientRect().bottom < innerHeight");
     if (!draftVisible) throw new Error('Draft actions are below the compact viewport');
+    const boardFits = await exec("document.querySelector('.board').getBoundingClientRect().bottom <= innerHeight - 9");
+    if (!boardFits) throw new Error('The compact board needs scrolling with a completed draft');
     window.setContentSize(1140, 780);
     await exec("document.querySelector('#insert-draft').click(); true");
     await waitFor("fixture.terminalText().includes('parser.ts')");
@@ -161,7 +196,7 @@ module.exports = async (window, directory) => {
                     await save(`17a-active-application-${language}`);
                     await exec("fixture.go('overview'); fixture.begin('hardware'); fixture.release('hardware'); true");
                     await waitFor(`document.querySelector('#notification-text').textContent === ${JSON.stringify(warning)} &&
-                        document.querySelector('#draft-text').value.length > 0 && document.querySelector('.hero').dataset.state === 'idle'`);
+                        document.querySelector('#draft-text').value.length > 0 && document.querySelector('.capture-panel').dataset.state === 'idle'`);
                     await save(`17b-external-focus-error-${language}`);
                     await exec("document.querySelector('#dismiss').click(); true");
                 }
@@ -182,7 +217,7 @@ module.exports = async (window, directory) => {
     await save('19-softdevice-v7');
     const previousDraft = await exec("document.querySelector('#draft-text').value");
     await exec("fixture.go('overview'); fixture.begin('hardware'); fixture.disconnectHid(); true");
-    await waitFor("document.querySelector('.hero').dataset.state === 'idle' && !document.querySelector('#device-pill').classList.contains('live')");
+    await waitFor("document.querySelector('.capture-panel').dataset.state === 'idle' && !document.querySelector('#device-pill').classList.contains('live')");
     if (await exec("document.querySelector('#draft-text').value") !== previousDraft) {
         throw new Error('Disconnect replaced the existing draft');
     }
@@ -346,10 +381,10 @@ module.exports = async (window, directory) => {
     await exec("fixture.setModelStatus('parakeet', { damaged: true, downloading: true }, 57); document.querySelector('[data-model=parakeet]').scrollIntoView({ block: 'end' }); true");
     await save('47-model-repairing');
     await exec("fixture.setModelStatus('parakeet', { damaged: true }); fixture.go('overview'); true");
-    await waitFor("document.querySelector('#ready-model').textContent.includes('Перескачайте')");
+    await waitFor("document.querySelector('#capture-status').textContent === 'Нужна замена модели'");
     await save('48-model-damaged-overview');
     await exec("fixture.begin('manual'); true");
-    await waitFor("document.querySelector('#current-page').textContent === 'Распознавание' && document.querySelector('.hero').dataset.state === 'idle'");
+    await waitFor("document.querySelector('[data-section=speech]').getAttribute('aria-current') === 'page' && document.querySelector('.capture-panel').dataset.state === 'idle'");
     await save('49-model-damaged-recording-guard');
     await exec("document.querySelector('#dismiss').click(); fixture.setModelStatus('parakeet', { installed: true }); fixture.go('speech'); true");
     await save('50-model-repaired');
@@ -362,23 +397,25 @@ module.exports = async (window, directory) => {
         await exec("document.querySelector('#auto-insert').click(); true");
     }
     await waitFor('vibemic.init().then(data => data.settings.autoInsert)');
-    const terminalBefore = await exec("fixture.terminalText().split('parser.ts').length");
+    const terminalBefore = await exec('fixture.terminalText()');
     await exec('fixture.handlePtt(true); fixture.handlePtt(false); true');
-    await waitFor("document.querySelector('.hero').dataset.state === 'processing' && !document.querySelector('#manual-ptt').disabled");
+    await waitFor("document.querySelector('.capture-panel').dataset.state === 'processing' && !document.querySelector('#manual-ptt').disabled");
     await save('51-processing-allows-recording');
     await exec('fixture.handlePtt(true); true');
-    await waitFor("document.querySelector('.hero').dataset.state === 'recording' && document.querySelector('#capture-hint').textContent.includes('Предыдущая фраза')");
+    await waitFor("document.querySelector('.capture-panel').dataset.state === 'recording' && document.querySelector('#capture-hint').textContent.includes('Предыдущая фраза')");
     await save('52-overlapping-capture');
     await exec('fixture.handlePtt(false); true');
     await waitFor("document.querySelector('#capture-hint').textContent.includes('ждёт распознавания') && document.querySelector('#manual-ptt').disabled");
     await save('53-queued-capture');
     await exec('fixture.handlePtt(true); fixture.handlePtt(false); true');
-    if (!await exec("document.querySelector('.hero').dataset.state === 'processing' && document.querySelector('#manual-ptt').disabled")) {
+    if (!await exec("document.querySelector('.capture-panel').dataset.state === 'processing' && document.querySelector('#manual-ptt').disabled")) {
         throw new Error('A third take bypassed the one-item queue');
     }
-    await waitFor("fixture.terminalText().split('parser.ts').length > " + terminalBefore);
+    await waitFor(`fixture.terminalText() !== ${JSON.stringify(terminalBefore)} &&
+        fixture.terminalText().trimEnd().endsWith('Проверь падающий тест в parser.ts и исправь причину.') &&
+        document.querySelector('#draft-state').textContent.includes('Вставлено в поле ввода агента')`);
     await exec("(() => { document.querySelector('#dismiss').click(); const field = document.querySelector('#draft-text'); field.focus(); field.value += ' Сохрани правку.'; field.dispatchEvent(new Event('input')); return true; })()");
-    await waitFor("!document.querySelector('#draft-select').hidden && document.querySelector('.hero').dataset.state === 'idle'");
+    await waitFor("!document.querySelector('#draft-select').hidden && document.querySelector('.capture-panel').dataset.state === 'idle'");
     if (!await exec("document.querySelector('#draft-text').value.includes('Сохрани правку') && !fixture.terminalText().includes('Добавь проверку')")) {
         throw new Error('An overlapping transcript replaced the draft being edited or automatically pasted');
     }
@@ -453,7 +490,7 @@ module.exports = async (window, directory) => {
         }
         console.log('AudioWorklet produced 16 kHz PCM and kept the stream until both overlapping collectors closed.');
     }
-    await exec("fixture.go('overview'); fixture.preparingInput(); true");
+    await exec("fixture.go('hardware'); fixture.preparingInput(); true");
     await waitFor("document.querySelector('#ready-device').textContent === 'Подготовка аудиовхода'");
     await save('22-preparing-usb-input');
 
@@ -465,8 +502,8 @@ module.exports = async (window, directory) => {
         project: '/ignored/project', microphone: 'ignored-input'
     } };
     await fs.writeFile(importFile, JSON.stringify(profile));
-    await exec("document.querySelector('#dismiss').click(); document.querySelector('[data-page=settings]').click(); true");
-    await waitFor("document.querySelector('#current-page').textContent === 'Настройки'");
+    await exec("document.querySelector('#dismiss').click(); fixture.go('overview'); document.querySelector('#open-settings').click(); true");
+    await waitFor("document.querySelector('[data-section=settings]').getAttribute('aria-current') === 'page'");
     await save('66-settings');
     window.setContentSize(740, 615);
     await save('67-settings-compact');
@@ -630,7 +667,7 @@ module.exports = async (window, directory) => {
         window.setContentSize(1140, 780);
         await exec("fixture.go('settings'); true");
         await save('91-language-' + language);
-        window.setContentSize(740, 615);
+        window.setContentSize(520, 450);
         await save('92-language-compact-' + language);
 
         await exec(`fixture.setMicrophones([
