@@ -71,17 +71,13 @@ const destination = path.join(resources, 'engine', 'nemo');
 await fs.rm(destination, { recursive: true, force: true });
 await fs.cp(runtime, destination, { recursive: true, verbatimSymlinks: true });
 await fs.rm(path.join(resources, 'engine', 'whisper-cli' + extension), { force: true });
+await fs.rm(path.join(resources, 'engine', 'LICENSE.whisper.cpp'), { force: true });
 
 const helperName = 'vibemic-desktop-draft' + extension;
 const helper = path.join(resources, 'engine', helperName);
 if (process.env.VIBEMIC_DRAFT_HELPER) {
     await fs.copyFile(process.env.VIBEMIC_DRAFT_HELPER, helper);
 } else if (process.platform === 'darwin') {
-    const ptyHelpers = path.join(root, 'desktop', 'node_modules', 'node-pty', 'prebuilds');
-    for (const arch of ['arm64', 'x64']) {
-        const binary = path.join(ptyHelpers, `darwin-${arch}`, 'spawn-helper');
-        if (await exists(binary)) await fs.chmod(binary, 0o755);
-    }
     const swift = path.join(root, 'host', 'macos');
     const cache = path.join(build, 'swift-desktop-cache');
     await fs.mkdir(cache, { recursive: true });

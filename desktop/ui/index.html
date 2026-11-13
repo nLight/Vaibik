@@ -1,206 +1,348 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self'; connect-src 'self'; media-src 'self' blob:">
-  <title>VibeMic</title>
-  <link rel="stylesheet" href="/xterm.css">
-  <link rel="stylesheet" href="/styles.css">
-  <script defer src="/xterm.js"></script>
-  <script defer src="/xterm-fit.js"></script>
-  <script type="module" src="/renderer.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light">
+    <title>VibeMic</title>
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main>
-    <header class="toolbar">
-      <span class="window-title">VibeMic</span>
-      <button class="toolbar-button" id="open-settings" data-page="settings" aria-keyshortcuts="Control+, Meta+,"><i data-icon="gear"></i>Настройки</button>
-      <button class="toolbar-button" id="close-settings" data-page="overview" hidden><i data-icon="back"></i>К диктовке</button>
+<main>
+    <!-- ===== Faceplate header (window drag region) ===== -->
+    <header class="toolbar" data-tauri-drag-region>
+        <div class="brand" data-tauri-drag-region>
+            <span class="brand-mark"></span>
+            <span class="brand-word">VIBEMIC</span>
+            <span class="brand-model">VM-01</span>
+        </div>
+        <span class="toolbar-spacer" data-tauri-drag-region></span>
+        <button id="sound-toggle" class="icon-btn" type="button" aria-pressed="true" aria-label="Звук включён" title="Звук включён">
+            <span class="state-dot"></span>
+            <i data-icon="sound"></i>
+        </button>
+        <button id="open-settings" class="icon-btn" type="button" data-page="settings" aria-label="Настройки" title="Настройки">
+            <i data-icon="gear"></i>
+        </button>
+        <button id="close-settings" class="icon-btn wide" type="button" data-page="overview" hidden>
+            <i data-icon="back"></i><span>Готово</span>
+        </button>
     </header>
+
+    <!-- ===== Settings tabs ===== -->
     <nav class="settings-nav" aria-label="Разделы настроек" hidden>
-      <button data-section="settings" class="selected" aria-current="page">Общие</button>
-      <button data-section="agents">Агенты</button>
-      <button data-section="speech">Распознавание</button>
-      <button data-section="hardware">Платы</button>
+        <button type="button" data-section="settings"><i data-icon="sliders"></i><span>Общие</span></button>
+        <button type="button" data-section="agents"><i data-icon="terminal"></i><span>Агенты</span></button>
+        <button type="button" data-section="speech"><i data-icon="wave"></i><span>Распознавание</span></button>
+        <button type="button" data-section="hardware"><i data-icon="cpu"></i><span>Платы</span></button>
     </nav>
-    <div id="notification" class="notification" role="status" hidden><span id="notification-text"></span><button id="dismiss" aria-label="Закрыть уведомление"><i data-icon="close"></i></button></div>
-    <div class="scroll-area" id="scroll-area">
-      <section class="board" data-view="overview" aria-label="Диктовка">
-        <div class="capture-panel" data-state="idle">
-          <div class="capture-readout" role="status" aria-atomic="true">
-            <span class="led" aria-hidden="true"></span>
-            <div>
-              <h1 id="capture-status">Ожидание PTT</h1>
-              <p id="capture-hint"></p>
-            </div>
-          </div>
-          <button id="guide-next" class="secondary" hidden></button>
-          <button id="manual-ptt" class="ptt-button" aria-label="Удерживать для пробной записи" title="Пробная запись с выбранного микрофона" disabled><i data-icon="mic"></i></button>
-        </div>
-        <section class="draft" aria-labelledby="draft-label">
-          <div class="section-head">
-            <h2 id="draft-label">Черновик</h2>
-            <select id="draft-select" aria-label="Фраза в черновике" hidden></select>
-          </div>
-          <textarea id="draft-text" aria-labelledby="draft-label" placeholder="Здесь появится текст диктовки…" spellcheck="false"></textarea>
-          <div class="draft-footer">
-            <p id="draft-state" role="status" hidden></p>
-            <div class="actions">
-              <button class="secondary" id="copy-draft" disabled><i data-icon="copy"></i>Копировать</button>
-              <button class="primary" id="insert-draft" disabled hidden><i data-icon="corner"></i>Вставить в терминал</button>
-            </div>
-          </div>
-        </section>
-        <footer class="device-status">
-          <button id="device-pill" data-page="hardware" title="Платы">
-            <span class="led" aria-hidden="true"></span><span id="device-label">VibeMic не подключён</span>
-          </button>
-          <span id="transmitter-battery" role="img" hidden>
-            <span class="battery-meter" aria-hidden="true"></span><i data-icon="flash" aria-hidden="true"></i>
-            <span id="battery-label"></span>
-          </span>
-        </footer>
-      </section>
 
-      <section class="page" data-view="hardware" hidden>
-        <article class="card setup">
-          <div class="section-head">
-            <div><h2>Подключение</h2><p id="ready-device"></p></div>
-            <button id="connect-hid" class="primary"><i data-icon="usb"></i><span id="connect-hid-label">Подключить VibeMic</span></button>
-          </div>
-        </article>
-        <div class="two-columns">
-          <article class="card role-card">
-            <h2>Передатчик <span class="tag">TX</span></h2><p>Pro Micro nRF52840 с внешним PDM-микрофоном и кнопкой.</p>
-            <dl class="pins"><div><dt>PTT</dt><dd>P0.06 ↔ GND</dd></div><div><dt>PDM CLK</dt><dd>P0.17</dd></div><div><dt>PDM DATA</dt><dd>P0.20</dd></div><div><dt>3V / GND / SEL</dt><dd>3,3 В / GND / GND</dd></div></dl>
-          </article>
-          <article class="card role-card">
-            <h2>USB-донгл <span class="tag blue">RX</span></h2><p>Для работы по радио подключите вторую Pro Micro nRF52840 кабелем данных.</p>
-            <dl class="pins"><div><dt>Аудиовход</dt><dd>PTT Dictation Mic</dd></div><div><dt>Кнопка</dt><dd>VibeMic USB HID</dd></div><div><dt>Радиоканал</dt><dd>ESB · 2,4 ГГц</dd></div></dl>
-          </article>
-        </div>
-        <article class="card setup">
-          <div class="section-head"><div><h2>Прошивка по USB</h2><p>Подключите одну плату и дважды быстро замкните RST и GND.</p></div><button class="secondary" id="refresh-volumes"><i data-icon="refresh"></i>Обновить</button></div>
-          <div class="field-row">
-            <label>Диск загрузчика<select id="volume"><option value="">Выберите диск</option></select></label>
-            <label>Роль платы<select id="board-role"><option value="transmitter">Передатчик</option><option value="transmitter-v2-battery">Передатчик · nice!nano v2</option><option value="receiver">USB-донгл</option><option value="mic-probe">PDM Probe</option></select></label>
-          </div>
-          <p id="volume-status" class="inline-status">Поддерживается Adafruit UF2 с SoftDevice S140 v6 или v7.</p>
-          <p id="battery-sensor-hint" class="inline-status" hidden>Вариант nice!nano v2 измеряет батарею через VDDH. Для SuperMini и других клонов сначала проверьте схему питания. Обновите также донгл для передачи заряда по радио.</p>
-          <div class="actions"><button class="secondary" id="firmware-backups">Резервные копии</button><button class="secondary" id="choose-volume">Указать диск</button><button class="primary" id="flash-firmware" disabled><i data-icon="flash"></i><span id="flash-label">Прошить плату</span></button></div>
-        </article>
-        <details class="card setup" id="pairing-panel">
-          <summary><strong>Код радиопары</strong><span class="tag" id="active-pair-code">Стендовый адрес</span></summary>
-          <p id="pair-code-hint">Прошейте обе платы с одним кодом. На другом компьютере введите сохранённый код перед прошивкой. Пустое поле возвращает стендовый адрес.</p>
-          <form id="pairing-form">
-            <label>Код для следующей прошивки<input id="pair-code" type="text" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Например 8B27-3DE4" aria-describedby="pair-code-hint"></label>
-            <div class="actions"><button class="secondary" id="copy-pair-code" type="button" disabled>Скопировать код</button><button class="secondary" id="generate-pair-code" type="button">Сгенерировать</button><button class="primary" id="save-pair-code" type="submit" disabled>Сохранить код</button></div>
-          </form>
-          <p id="pair-code-status" class="inline-status" role="status" hidden></p>
-        </details>
-        <article class="card setup" id="linux-access" hidden>
-          <div class="section-head"><div><h2>Доступ к USB в Linux</h2><p id="usb-rule-status" role="status"></p></div><button class="secondary" id="install-usb-rule">Разрешить USB</button></div>
-        </article>
-        <article class="card setup" id="link-check" aria-labelledby="link-check-title">
-          <div class="section-head">
-            <div><h2 id="link-check-title">Проверка кнопки и звука</h2><p>Запишите и прослушайте фразу с передатчика перед настройкой распознавания.</p></div>
-            <button class="secondary" id="link-check-toggle" disabled>Начать проверку</button>
-          </div>
-          <p id="link-check-status" class="inline-status" role="status">Подключите микрофон по USB или подключите донгл.</p>
-          <audio id="link-check-audio" controls preload="metadata" aria-label="Запись проверки передатчика" hidden></audio>
-          <dl id="link-check-stats" hidden>
-            <div><dt>Минимальный сигнал</dt><dd id="link-rssi"></dd></div>
-            <div><dt>Тишина вместо пропусков</dt><dd id="link-silent"></dd></div>
-            <div><dt>Ошибки USB-аудио</dt><dd id="link-usb-errors"></dd></div>
-          </dl>
-        </article>
-        <details class="card setup" id="pdm-probe-panel">
-          <summary><strong>Проверка PDM по USB</strong></summary>
-          <p class="inline-status">Подключите внешний микрофон к передатчику и прошейте PDM Probe. Запись трёх секунд поможет проверить питание, проводку и уровень звука.</p>
-          <div class="actions"><button class="secondary" id="pdm-prepare">Выбрать PDM Probe</button><button class="primary" id="pdm-record">Записать 3 секунды</button></div>
-          <p class="inline-status" id="pdm-status" role="status">Подключите передатчик с прошивкой PDM Probe по USB.</p>
-          <audio id="pdm-audio" controls preload="metadata" aria-label="Запись проверки PDM" hidden></audio>
-          <dl class="pins" id="pdm-levels" hidden>
-            <div><dt>Пиковый уровень</dt><dd id="pdm-peak"></dd></div>
-            <div><dt>RMS без DC</dt><dd id="pdm-rms"></dd></div>
-            <div><dt>DC-смещение</dt><dd id="pdm-dc"></dd></div>
-            <div><dt>Отсчёты с клиппингом</dt><dd id="pdm-clipped"></dd></div>
-          </dl>
-          <div class="actions"><button class="secondary" id="pdm-save" hidden>Сохранить WAV</button><button class="secondary" id="pdm-restore">Выбрать обычный передатчик</button></div>
-        </details>
-      </section>
-
-      <section class="page" data-view="speech" hidden>
-        <article class="card setup">
-          <div class="section-head"><div><h2>Вход и язык</h2><p>Системный микрофон для звонков можно оставить выбранным отдельно.</p></div><button id="refresh-mics" class="secondary"><i data-icon="refresh"></i>Найти микрофоны</button></div>
-          <div class="field-row">
-            <label>Микрофон<select id="microphone"><option value="">VibeMic автоматически</option></select></label>
-            <label>Язык записи<select id="language" disabled><option value="auto">Автоматически — 25 языков</option></select></label>
-          </div>
-          <p class="inline-status" id="mic-status">Подключите VibeMic или выберите другой вход для проверки.</p>
-        </article>
-        <div class="subhead" id="local-models" tabindex="-1"><h2>Локальные модели</h2><p>После загрузки голос распознаётся на компьютере.</p></div>
-        <div class="two-columns" id="model-list"></div>
-      </section>
-
-      <section class="page" data-view="agents" hidden>
-        <div class="two-columns" id="agent-list"></div>
-        <article class="card setup">
-          <div class="section-head"><div><h2>Куда вставлять черновик</h2><p id="output-hint">Выберите, где проверять распознанный запрос.</p></div><button id="external-permissions" class="secondary" hidden>Доступ к окну</button></div>
-          <div class="field-row">
-            <label>Место вставки<select id="output"><option value="terminal">Терминал VibeMic</option><option value="desktop">Открытый Claude или Codex</option><option value="manual">Черновик в VibeMic</option></select></label>
-            <label class="checkbox"><input type="checkbox" id="auto-insert"><span>Вставлять после PTT</span></label>
-          </div>
-        </article>
-        <article class="card setup" id="session-card">
-          <div class="section-head"><div><h2>Сессия проекта</h2><p class="path-text" id="project-path"></p></div><button class="secondary" id="choose-project">Выбрать папку</button></div>
-          <div class="field-row"><label>Агент<select id="agent"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label></div>
-          <div class="actions"><button class="secondary" id="stop-terminal" hidden>Завершить сессию</button><button class="primary" id="start-terminal"><i data-icon="terminal"></i>Открыть терминал</button></div>
-          <div class="terminal-wrap" id="terminal-wrap" hidden><div id="terminal" aria-label="Терминал агента"></div></div>
-          <details class="install-log" id="install-log" hidden><summary>Журнал установки</summary><pre id="install-output"></pre></details>
-        </article>
-      </section>
-
-      <section class="page" data-view="settings" hidden>
-        <article class="card setup" aria-labelledby="dictation-mode-title">
-          <h2 id="dictation-mode-title">Режим диктовки</h2>
-          <select id="dictation-mode" aria-labelledby="dictation-mode-title"><option value="local">Parakeet во всех приложениях</option><option value="auto">Автоматически по приложению</option></select>
-          <p class="inline-status" id="dictation-mode-hint"></p>
-          <div id="codex-shortcut-settings" hidden>
-            <label class="checkbox"><input id="codex-dictation-shortcut" type="checkbox"><span>Запускать диктовку Codex сочетанием ⌃⌥⇧F13</span></label>
-            <p class="inline-status">Обновите прошивку подключённой платы. В Codex откройте Dictation shortcut на редактирование и удержите PTT, чтобы записать сочетание.</p>
-          </div>
-          <div id="claude-shortcut-settings" hidden>
-            <label class="checkbox"><input id="claude-dictation-shortcut" type="checkbox"><span>Запускать диктовку Claude сочетанием ⌘D</span></label>
-            <p class="inline-status" id="claude-shortcut-hint" hidden>Обновите прошивку подключённой платы. В Claude Desktop откройте Settings → Desktop app → Dictation shortcut и выберите Command+D.</p>
-          </div>
-          <p class="inline-status">Встроенная диктовка использует микрофон, выбранный в приложении или macOS. Два коротких нажатия отправляют готовый текст в Codex или Claude.</p>
-        </article>
-        <article class="card setup" aria-labelledby="ui-language-title">
-          <h2 id="ui-language-title">Язык интерфейса</h2>
-          <select id="ui-language" aria-labelledby="ui-language-title"><option value="ru">Русский</option><option value="en">English</option></select>
-        </article>
-        <article class="card setup" aria-labelledby="profile-title">
-          <div class="section-head"><div><h2 id="profile-title">Профиль VibeMic</h2><p>В JSON сохраняются код радиопары, режим диктовки, агент и настройки вставки.</p></div></div>
-          <p class="inline-status">Микрофон, папка проекта и пути к CLI выбираются отдельно на каждом компьютере.</p>
-          <div class="actions">
-            <button class="secondary" id="import-profile">Импортировать профиль</button>
-            <button class="primary" id="export-profile">Экспортировать профиль</button>
-          </div>
-        </article>
-        <p class="version">VibeMic</p>
-      </section>
+    <!-- ===== Notification ===== -->
+    <div id="notification" class="notification" role="status" aria-live="polite" hidden>
+        <span id="notification-text"></span>
+        <button id="dismiss" type="button" aria-label="Закрыть уведомление"><i data-icon="close"></i></button>
     </div>
-  </main>
 
-  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
-    <form method="dialog">
-      <span class="tag" id="confirm-tag">НАСТРОЙКА</span>
-      <h2 id="confirm-title"></h2><p id="confirm-body"></p>
-      <dl id="confirm-details" class="pins" hidden></dl>
-      <div class="actions"><button class="secondary" value="cancel">Отмена</button><button class="primary" value="accept" id="confirm-action">Продолжить</button></div>
+    <div id="scroll-area" class="scroll-area">
+        <!-- ================= OVERVIEW / DEVICE FACE ================= -->
+        <section class="board" data-view="overview">
+            <div class="oled" data-state="idle">
+                <div class="oled-status">
+                    <span id="status-led" class="led green"></span>
+                    <span id="capture-status">Готов к записи</span>
+                    <span class="spacer"></span>
+                    <button id="device-pill" type="button" data-page="hardware" data-transport="">
+                        <span class="led"></span>
+                        <span id="device-label">VibeMic не подключён</span>
+                    </button>
+                    <span id="transmitter-battery" hidden>
+                        <span class="battery-meter"></span>
+                        <i data-icon="battery"></i>
+                        <span id="battery-label">—</span>
+                    </span>
+                </div>
+                <p id="capture-hint" hidden></p>
+                <div class="draft-screen">
+                    <textarea id="draft-text" rows="3" aria-label="Черновик задачи" spellcheck="false"></textarea>
+                    <div class="draft-meta" hidden>
+                        <p id="draft-state" data-kind="info" hidden></p>
+                        <select id="draft-select" class="dark" aria-label="Фраза в черновике" hidden></select>
+                    </div>
+                    <div id="standby" class="standby">
+                        <p id="standby-hint" class="standby-hint">Здесь появится текст диктовки…</p>
+                    </div>
+                </div>
+                <div class="oled-controls">
+                    <button id="manual-ptt" class="ptt-round" type="button" aria-label="Удерживать для пробной записи"><i data-icon="mic"></i></button>
+                    <div id="output-segmented" class="segmented dark" role="group" aria-label="Место вставки">
+                        <button type="button" data-output="terminal" aria-pressed="true" aria-label="Терминал"><i data-icon="terminal"></i><span>Терминал</span></button>
+                        <button type="button" data-output="desktop" aria-pressed="false" aria-label="Приложение"><i data-icon="corner"></i><span>Приложение</span></button>
+                        <button type="button" data-output="manual" aria-pressed="false" aria-label="Черновик"><i data-icon="copy"></i><span>Черновик</span></button>
+                    </div>
+                    <button id="guide-next" class="primary" type="button" hidden></button>
+                    <button id="insert-draft" class="primary" type="button" hidden><i data-icon="terminal"></i><span>Вставить</span></button>
+                    <button id="copy-draft" class="secondary ghost" type="button" disabled><i data-icon="copy"></i><span>Копировать</span></button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= GENERAL SETTINGS ================= -->
+        <section class="page" data-view="settings" hidden>
+            <article class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Режим диктовки</h2>
+                        <p>Выберите, кто распознаёт речь при удержании PTT.</p>
+                    </div>
+                </div>
+                <select id="dictation-mode" aria-label="Способ диктовки">
+                    <option value="local">Parakeet во всех приложениях</option>
+                    <option value="auto">Автоматически по приложению</option>
+                </select>
+                <p id="dictation-mode-hint" class="inline-status"></p>
+                <div id="codex-shortcut-settings" hidden>
+                    <label class="checkbox"><input id="codex-dictation-shortcut" type="checkbox"><span>Запускать диктовку Codex сочетанием ⌃⌥⇧F13</span></label>
+                </div>
+                <div id="claude-shortcut-settings" hidden>
+                    <label class="checkbox"><input id="claude-dictation-shortcut" type="checkbox"><span>Запускать диктовку Claude сочетанием ⌘D</span></label>
+                    <p id="claude-shortcut-hint" class="inline-status" hidden>Обновите прошивку подключённой платы. В Claude Desktop откройте Settings → Desktop app → Dictation shortcut и выберите Command+D.</p>
+                </div>
+            </article>
+
+            <article class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Язык интерфейса</h2>
+                        <p>Выберите язык интерфейса приложения. Parakeet определяет язык речи автоматически.</p>
+                    </div>
+                </div>
+                <select id="ui-language" aria-label="Язык интерфейса">
+                    <option value="ru">Русский</option>
+                    <option value="en">English</option>
+                </select>
+            </article>
+
+            <article class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Профиль VibeMic</h2>
+                        <p>В JSON сохраняются код радиопары, режим диктовки, агент и настройки вставки.</p>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button id="import-profile" class="secondary" type="button"><i data-icon="download"></i><span>Импортировать профиль</span></button>
+                    <button id="export-profile" class="secondary" type="button"><i data-icon="folder"></i><span>Экспортировать профиль</span></button>
+                </div>
+            </article>
+            <p class="version"></p>
+        </section>
+
+        <!-- ================= AGENTS ================= -->
+        <section class="page" data-view="agents" hidden>
+            <article class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Куда вставлять черновик</h2>
+                        <p>Выберите, где проверять распознанный запрос.</p>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <label>Агент
+                        <select id="agent">
+                            <option value="codex">Codex</option>
+                            <option value="claude">Claude Code</option>
+                        </select>
+                    </label>
+                    <label>Место вставки
+                        <select id="output">
+                            <option value="terminal">Терминал VibeMic</option>
+                            <option value="desktop">Активное приложение</option>
+                            <option value="manual">Черновик</option>
+                        </select>
+                    </label>
+                </div>
+                <p id="output-hint" class="inline-status"></p>
+                <div class="field-row">
+                    <label class="checkbox"><input id="auto-insert" type="checkbox"><span>Вставлять после PTT</span></label>
+                    <button id="external-permissions" class="secondary" type="button" hidden><i data-icon="lock"></i><span>Доступ к окну</span></button>
+                </div>
+            </article>
+
+            <article id="session-card" class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Сессия проекта</h2>
+                        <p id="project-path" class="path-text"></p>
+                    </div>
+                    <button id="choose-project" class="secondary" type="button"><i data-icon="folder"></i><span>Выбрать папку</span></button>
+                </div>
+                <div class="actions">
+                    <button id="stop-terminal" class="secondary" type="button" hidden><i data-icon="stop"></i><span>Завершить сессию</span></button>
+                    <button id="start-terminal" class="primary" type="button"><i data-icon="terminal"></i><span>Открыть терминал</span></button>
+                </div>
+                <div id="terminal-wrap" class="terminal-wrap" hidden><div id="terminal"></div></div>
+            </article>
+
+            <div class="subhead">
+                <h2>Агенты</h2>
+                <p>Запустите Codex или Claude Code в терминале VibeMic.</p>
+            </div>
+            <div id="agent-list" class="two-columns"></div>
+
+            <details id="install-log" class="install-log" hidden>
+                <summary>Журнал установки</summary>
+                <pre id="install-output"></pre>
+            </details>
+        </section>
+
+        <!-- ================= TRANSCRIPTION ================= -->
+        <section class="page" data-view="speech" hidden>
+            <article class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Вход и язык</h2>
+                        <p>Выберите микрофон и установите Parakeet для локальной диктовки.</p>
+                    </div>
+                    <button id="refresh-mics" class="secondary" type="button"><i data-icon="refresh"></i><span>Найти микрофоны</span></button>
+                </div>
+                <div class="field-row">
+                    <label>Микрофон
+                        <select id="microphone"><option value="">VibeMic автоматически</option></select>
+                    </label>
+                    <label>Язык записи
+                        <select id="language"><option value="auto">Определять автоматически</option></select>
+                    </label>
+                </div>
+                <p id="mic-status" class="inline-status"></p>
+            </article>
+
+            <div id="local-models" class="subhead">
+                <h2>Локальные модели</h2>
+                <p>После загрузки голос распознаётся на компьютере.</p>
+            </div>
+            <div id="model-list" class="two-columns"></div>
+        </section>
+
+        <!-- ================= HARDWARE ================= -->
+        <section class="page" data-view="hardware" hidden>
+            <article class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Подключение</h2>
+                        <p>Прошейте две платы Pro Micro nRF52840 и подключите донгл.</p>
+                    </div>
+                    <button id="connect-hid" class="secondary" type="button"><i data-icon="usb"></i><span id="connect-hid-label">Подключить VibeMic</span></button>
+                </div>
+                <p id="ready-device" class="inline-status"></p>
+            </article>
+
+            <article id="linux-access" class="card setup" hidden>
+                <div class="section-head">
+                    <div><h2>Доступ к USB в Linux</h2></div>
+                    <button id="install-usb-rule" class="secondary" type="button" hidden><i data-icon="lock"></i><span>Разрешить USB</span></button>
+                </div>
+                <p id="usb-rule-status" class="inline-status"></p>
+            </article>
+
+            <article id="link-check" class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2 id="link-check-title">Проверка кнопки и звука</h2>
+                        <p>Запишите и прослушайте фразу с передатчика перед настройкой распознавания.</p>
+                    </div>
+                    <button id="link-check-toggle" class="secondary" type="button">Начать проверку</button>
+                </div>
+                <p id="link-check-status" class="inline-status"></p>
+                <audio id="link-check-audio" controls hidden></audio>
+                <dl id="link-check-stats" hidden>
+                    <div><dt>Минимальный сигнал</dt><dd id="link-rssi">—</dd></div>
+                    <div><dt>Тишина вместо пропусков</dt><dd id="link-silent">—</dd></div>
+                    <div><dt>Ошибки USB-аудио</dt><dd id="link-usb-errors">—</dd></div>
+                </dl>
+            </article>
+
+            <article class="card setup">
+                <div class="section-head">
+                    <div>
+                        <h2>Прошивка по USB</h2>
+                        <p>Подключите одну плату и дважды быстро замкните RST и GND.</p>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <label>Диск загрузчика
+                        <select id="volume"><option value="">Выберите диск</option></select>
+                    </label>
+                    <label>Роль платы
+                        <select id="board-role">
+                            <option value="transmitter">Передатчик</option>
+                            <option value="transmitter-v2-battery">Передатчик · nice!nano v2</option>
+                            <option value="receiver">USB-донгл</option>
+                            <option value="mic-probe">PDM Probe</option>
+                        </select>
+                    </label>
+                </div>
+                <p id="volume-status" class="inline-status"></p>
+                <p id="battery-sensor-hint" class="inline-status" hidden>Вариант nice!nano v2 измеряет батарею через VDDH. Для SuperMini и других клонов сначала проверьте схему питания. Обновите также донгл для передачи заряда по радио.</p>
+                <div class="actions">
+                    <button id="firmware-backups" class="secondary" type="button"><i data-icon="folder"></i><span>Резервные копии</span></button>
+                    <button id="choose-volume" class="secondary" type="button"><i data-icon="usb"></i><span>Указать диск</span></button>
+                    <button id="refresh-volumes" class="secondary" type="button"><i data-icon="refresh"></i><span>Обновить</span></button>
+                    <button id="flash-firmware" class="primary" type="button"><i data-icon="flash"></i><span id="flash-label">Прошить плату</span></button>
+                </div>
+            </article>
+
+            <details id="pairing-panel" class="card setup">
+                <summary>Код радиопары<span id="active-pair-code" class="tag">Стендовый адрес</span></summary>
+                <p id="pair-code-hint">Прошейте обе платы с одним кодом. На другом компьютере введите сохранённый код перед прошивкой. Пустое поле возвращает стендовый адрес.</p>
+                <form id="pairing-form">
+                    <label>Код для следующей прошивки
+                        <input id="pair-code" type="text" placeholder="Например 8B27-3DE4" maxlength="9" spellcheck="false" autocapitalize="characters" autocomplete="off">
+                    </label>
+                    <div class="actions">
+                        <button id="generate-pair-code" class="secondary" type="button"><i data-icon="refresh"></i><span>Сгенерировать</span></button>
+                        <button id="copy-pair-code" class="secondary" type="button"><i data-icon="copy"></i><span>Скопировать код</span></button>
+                        <button id="save-pair-code" class="primary" type="submit"><i data-icon="check"></i><span>Сохранить код</span></button>
+                    </div>
+                </form>
+                <p id="pair-code-status" class="inline-status" hidden></p>
+            </details>
+
+            <details id="pdm-probe-panel" class="card setup">
+                <summary>Проверка PDM по USB</summary>
+                <p>Подключите внешний микрофон к передатчику и прошейте PDM Probe. Запись трёх секунд поможет проверить питание, проводку и уровень звука.</p>
+                <div class="actions">
+                    <button id="pdm-prepare" class="secondary" type="button"><i data-icon="cpu"></i><span>Выбрать PDM Probe</span></button>
+                    <button id="pdm-record" class="primary" type="button"><i data-icon="mic"></i><span>Записать 3 секунды</span></button>
+                    <button id="pdm-restore" class="secondary" type="button"><i data-icon="radio"></i><span>Выбрать обычный передатчик</span></button>
+                </div>
+                <p id="pdm-status" class="inline-status"></p>
+                <audio id="pdm-audio" controls hidden></audio>
+                <dl id="pdm-levels" class="pins" hidden>
+                    <div><dt>Пиковый уровень</dt><dd id="pdm-peak">—</dd></div>
+                    <div><dt>RMS без DC</dt><dd id="pdm-rms">—</dd></div>
+                    <div><dt>DC-смещение</dt><dd id="pdm-dc">—</dd></div>
+                    <div><dt>Отсчёты с клиппингом</dt><dd id="pdm-clipped">—</dd></div>
+                </dl>
+                <div class="actions">
+                    <button id="pdm-save" class="secondary" type="button" hidden><i data-icon="download"></i><span>Сохранить WAV</span></button>
+                </div>
+            </details>
+        </section>
+    </div>
+</main>
+
+<!-- ===== Confirm dialog ===== -->
+<dialog id="confirm-dialog">
+    <span id="confirm-tag" class="tag"></span>
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-body"></p>
+    <dl id="confirm-details" class="pins" hidden></dl>
+    <form method="dialog" class="actions">
+        <button class="secondary" value="cancel">Отмена</button>
+        <button id="confirm-action" class="primary" value="accept"></button>
     </form>
-  </dialog>
+</dialog>
+
+<script type="module" src="/src/main.js"></script>
 </body>
 </html>

@@ -1,101 +1,27 @@
 {
   "name": "vibemic-desktop",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "private": true,
   "description": "VibeMic voice console for Codex and Claude Code",
   "homepage": "https://nlight.github.io/Vaibik/",
   "author": "VibeMic",
-  "main": "src/main.cjs",
+  "type": "module",
   "scripts": {
-    "start": "electron .",
-    "test": "node --test test/*.test.cjs",
-    "dist": "electron-builder --publish never"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "tauri dev",
+    "tauri": "tauri",
+    "test": "node --test test/*.test.mjs",
+    "dist": "tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.9.0",
     "@xterm/addon-fit": "0.11.0",
-    "@xterm/xterm": "6.0.0",
-    "node-pty": "1.1.0"
+    "@xterm/xterm": "6.0.0"
   },
   "devDependencies": {
-    "electron": "44.9.3",
-    "electron-builder": "26.18.0"
-  },
-  "build": {
-    "appId": "dev.vibemic.desktop",
-    "productName": "VibeMic",
-    "afterPack": "./src/after-pack.cjs",
-    "directories": {
-      "output": "../build/desktop-dist"
-    },
-    "files": [
-      "src/**/*",
-      "ui/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../build/desktop-resources",
-        "to": "vibemic"
-      }
-    ],
-    "asarUnpack": [
-      "node_modules/node-pty/**/*"
-    ],
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "assets/icon.png",
-      "minimumSystemVersion": "13.3",
-      "entitlements": "assets/entitlements.mac.plist",
-      "entitlementsInherit": "assets/entitlements.mac.plist",
-      "category": "public.app-category.developer-tools",
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "VibeMic uses the selected microphone to transcribe your push-to-talk recordings."
-      }
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "assets/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "icon": "assets/icon.png",
-      "category": "Development",
-      "maintainer": "VibeMic <vibemic@localhost>"
-    },
-    "deb": {
-      "depends": [
-        "libgtk-3-0",
-        "libnotify4",
-        "libnss3",
-        "libxss1",
-        "libxtst6",
-        "xdg-utils",
-        "libatspi2.0-0",
-        "libuuid1",
-        "libsecret-1-0",
-        "libasound2t64 | libasound2",
-        "libgbm1",
-        "udev"
-      ],
-      "fpm": [
-        "--deb-compression",
-        "gz",
-        "assets/70-vibemic.rules=/usr/lib/udev/rules.d/70-vibemic.rules"
-      ]
-    }
+    "@tauri-apps/cli": "^2.9.0",
+    "vite": "^7.1.0"
   }
 }

@@ -68,9 +68,9 @@ jobs:
         run: bash script/build_ci_firmware.sh
       - name: Check flash layouts
         run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const { validateUF2 } = require('./desktop/src/firmware.cjs');
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { validateUF2 } from './tools/uf2.mjs';
           for (const role of ['rx', 'tx', 'tx-v2-battery', 'tx-probe']) {
             for (const [suffix, address] of [['', 0x26000], ['-s140v7', 0x27000]]) {
               const file = `build/promicro-${role}${suffix}/zephyr/zephyr.uf2`;
@@ -159,11 +159,9 @@ jobs:
           if [[ "$NOTARIZE_MACOS" == true ]]; then
             notary_key="$signing_dir/notary.p8"
             (umask 077; printf '%s\n' "$NOTARY_KEY_P8" > "$notary_key")
-            export VIBEMIC_MAC_NOTARY_PROFILE=vaibik-ci
-            export VIBEMIC_MAC_NOTARY_KEYCHAIN="$keychain"
-            xcrun notarytool store-credentials "$VIBEMIC_MAC_NOTARY_PROFILE" \
-              --key "$notary_key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
-              --keychain "$keychain" --validate
+            export VIBEMIC_MAC_NOTARY_KEY="$notary_key"
+            export VIBEMIC_MAC_NOTARY_KEY_ID="$NOTARY_KEY_ID"
+            export VIBEMIC_MAC_NOTARY_ISSUER="$NOTARY_ISSUER_ID"
             flags=(--distribution)
             output=build/source-release/macos-distribution
             notarization='Accepted'

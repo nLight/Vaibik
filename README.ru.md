@@ -66,22 +66,21 @@ DEB устанавливает правило udev; переподключите
 
 ## Сборка
 
-Прошивки: **nRF Connect SDK 3.4.2**, **Zephyr SDK 1.0.1**, target `promicro_nrf52840/nrf52840/uf2`. Desktop: Node.js 22+, npm, CMake, C/C++ toolchain; на Mac нужны Xcode Command Line Tools.
+Прошивки: **nRF Connect SDK 3.4.2**, **Zephyr SDK 1.0.1**, target `promicro_nrf52840/nrf52840/uf2`. Desktop: Node.js 22+, npm, стабильный Rust (rustup), CMake, C/C++ toolchain; на Mac нужны Xcode Command Line Tools.
 
 ```sh
 VIBEMIC_NCS_WORKSPACE=/path/to/ncs ./script/build_firmware.sh
 npm --prefix desktop ci
-node desktop/node_modules/electron/install.js
 ./script/build_and_run.sh
 
 # Локальные DMG либо Developer ID
 ./script/package_macos.sh both
 ./script/package_macos.sh --signed both
 
-# Тесты и изолированные UI-снимки
+# Тесты и изолированный fixture-режим
 npm --prefix desktop test
 ./tools/test-host.sh
-VIBEMIC_REVIEW_DIRECTORY="$PWD/build/ui-review" ./script/build_and_run.sh --fixture
+./script/build_and_run.sh --fixture
 ```
 
 Скрипт собирает восемь образов UF2: передатчик, передатчик с измерением батареи, донгл и PDM Probe, каждый для S140 v6 и v7. Для Linux, нотарификации и структуры репозитория см. [English README](README.md#build). `tools/capture_mic.py` записывает WAV из PDM Probe с `pyserial`. Секреты подписи, модели и резервные копии прошивок не добавляйте в Git.

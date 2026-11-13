@@ -87,13 +87,12 @@ Install the pinned Nordic SDK/toolchain and run firmware builds inside its envir
 ```sh
 VIBEMIC_NCS_WORKSPACE=/path/to/ncs ./script/build_firmware.sh
 npm --prefix desktop ci
-node desktop/node_modules/electron/install.js
 ./script/build_and_run.sh
 ```
 
 The default firmware script produces eight UF2 images for desktop packaging: transmitter, battery-enabled transmitter, dongle, and PDM Probe, each for S140 v6 and v7. Use `./script/build_firmware.sh --mic-probe` to rebuild only probe images.
 
-Desktop builds need Node.js 22+, npm, CMake and a C/C++ toolchain; macOS also needs Xcode Command Line Tools. `script/prepare_desktop.mjs` downloads a pinned, checksum-verified [NVIDIA NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) runtime and bundles the firmware. Apple Silicon uses Metal; Intel uses the CPU runtime. Set `VIBEMIC_NEMO_RUNTIME` to a pre-extracted runtime root for an offline build.
+Desktop builds need Node.js 22+, npm, a stable Rust toolchain (rustup), CMake and a C/C++ toolchain; macOS also needs Xcode Command Line Tools. The companion is a Tauri 2 app: a Rust backend plus a retina, DPR-aware web UI in `desktop/ui`. `script/prepare_desktop.mjs` downloads a pinned, checksum-verified [NVIDIA NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp) runtime and bundles the firmware. Apple Silicon uses Metal; Intel uses the CPU runtime. Set `VIBEMIC_NEMO_RUNTIME` to a pre-extracted runtime root for an offline build.
 
 ```sh
 # macOS: local ad-hoc DMGs, or Developer ID signed DMGs
@@ -107,18 +106,21 @@ docker run --rm --platform linux/amd64 \
   node:22-bookworm bash /source/script/container_linux.sh
 ```
 
-Signed DMGs go to `build/source-release/macos-signed/`. A distribution build additionally needs your own exact `notarytool` profile name:
+Signed DMGs go to `build/source-release/macos-signed/`. A distribution build additionally needs notarization credentials: either your own exact `notarytool` profile name, or an App Store Connect API key triple:
 
 ```sh
 VIBEMIC_MAC_NOTARY_PROFILE=your-profile-name ./script/package_macos.sh --distribution both
+VIBEMIC_MAC_NOTARY_KEY=/path/AuthKey.p8 VIBEMIC_MAC_NOTARY_KEY_ID=KEYID \
+  VIBEMIC_MAC_NOTARY_ISSUER=ISSUER_UUID ./script/package_macos.sh --distribution both
 ```
 
 The script verifies bundle versions, architectures, executable signatures and all bundled UF2 files. It checks Apple acceptance, stapling and Gatekeeper in distribution mode. Never commit signing keys, models or firmware backups.
 
 ```sh
 npm --prefix desktop test
+cargo test --manifest-path desktop/src-tauri/Cargo.toml
 ./tools/test-host.sh
-VIBEMIC_REVIEW_DIRECTORY="$PWD/build/ui-review" ./script/build_and_run.sh --fixture
+./script/build_and_run.sh --fixture
 ```
 
 The fixture uses isolated sample data and exercises UI states without flashing physical boards. For acoustic checks, `tools/capture_mic.py` records WAV from PDM Probe (requires `pyserial`).
@@ -136,7 +138,7 @@ firmware/common/       packet codec, ESB configuration, playout buffer
 firmware/transmitter/  PDM, GPIO, pre-roll, ESB TX, USB PDM Probe
 firmware/receiver/     ESB RX, USB Audio + HID, connection watchdog
 host/                  native desktop insertion helpers and legacy bridge
-desktop/              Electron companion, EN/RU UI, tests
+desktop/              Tauri 2 companion: Rust backend, retina web UI, EN/RU, tests
 script/                firmware, packaging and isolated UI review
 site/                  buildless bilingual GitHub Pages site and assembly assets
 ```
