@@ -3,11 +3,14 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends cmake g++ make python3 pkg-config libarchive-tools \
-  libasound2 libgbm1 libgtk-3-0 libnss3 libxss1 xvfb xauth >/tmp/vibemic-apt.log
+  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+  libudev-dev libasound2-dev libssl-dev curl wget file ca-certificates >/tmp/vibemic-apt.log
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+. "$HOME/.cargo/env"
 work=/tmp/vibemic-work
 mkdir -p "$work/desktop" "$work/script"
-cp -R /source/desktop/{src,ui,assets,package.json,package-lock.json} "$work/desktop/"
-cp /source/script/{prepare_desktop.mjs,review_desktop.cjs} "$work/script/"
+cp -R /source/desktop/{ui,assets,src-tauri,package.json,package-lock.json,vite.config.js} "$work/desktop/"
+cp /source/script/prepare_desktop.mjs "$work/script/"
 for image in tx rx tx-s140v7 rx-s140v7 tx-probe tx-probe-s140v7 tx-v2-battery tx-v2-battery-s140v7; do
   destination="$work/build/promicro-$image/zephyr"
   mkdir -p "$destination"
@@ -15,14 +18,9 @@ for image in tx rx tx-s140v7 rx-s140v7 tx-probe tx-probe-s140v7 tx-v2-battery tx
 done
 cd "$work"
 npm --prefix desktop ci
-node desktop/node_modules/electron/install.js
 node script/prepare_desktop.mjs
-npm --prefix desktop run dist -- --linux deb
-cp "$work"/build/desktop-dist/*.deb /output/
-npm --prefix desktop run dist -- --linux AppImage \
-  --prepackaged "$work/build/desktop-dist/linux-unpacked" -c.toolsets.appimage=1.0.3
-cp "$work"/build/desktop-dist/*.AppImage /output/
-if [[ "${VIBEMIC_UI_REVIEW:-}" == 1 ]]; then
-  VIBEMIC_REVIEW_DIRECTORY=/output/ui-review-linux xvfb-run -a \
-    npm --prefix desktop start -- --fixture --no-sandbox --disable-gpu
-fi
+# linuxdeploy cannot mount FUSE inside the container.
+export APPIMAGE_EXTRACT_AND_RUN=1
+npm --prefix desktop run dist -- --bundles deb,appimage
+cp "$work"/desktop/src-tauri/target/release/bundle/deb/*.deb /output/
+cp "$work"/desktop/src-tauri/target/release/bundle/appimage/*.AppImage /output/

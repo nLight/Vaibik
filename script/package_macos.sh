@@ -21,11 +21,18 @@ esac
 
 identity=-
 if "$distribution"; then
-  profile=${VIBEMIC_MAC_NOTARY_PROFILE:-}
-  [[ -n "$profile" ]] || fail 'Set VIBEMIC_MAC_NOTARY_PROFILE to a notarytool keychain profile.'
-  notary_args=(--keychain-profile "$profile")
-  if [[ -n "${VIBEMIC_MAC_NOTARY_KEYCHAIN:-}" ]]; then
-    notary_args+=(--keychain "$VIBEMIC_MAC_NOTARY_KEYCHAIN")
+  if [[ -n "${VIBEMIC_MAC_NOTARY_KEY:-}" ]]; then
+    [[ -n "${VIBEMIC_MAC_NOTARY_KEY_ID:-}" && -n "${VIBEMIC_MAC_NOTARY_ISSUER:-}" ]] \
+      || fail 'Set VIBEMIC_MAC_NOTARY_KEY_ID and VIBEMIC_MAC_NOTARY_ISSUER alongside VIBEMIC_MAC_NOTARY_KEY.'
+    [[ -f "$VIBEMIC_MAC_NOTARY_KEY" ]] || fail 'VIBEMIC_MAC_NOTARY_KEY must point to a notarytool .p8 key.'
+    notary_args=(--key "$VIBEMIC_MAC_NOTARY_KEY" --key-id "$VIBEMIC_MAC_NOTARY_KEY_ID" --issuer "$VIBEMIC_MAC_NOTARY_ISSUER")
+  else
+    profile=${VIBEMIC_MAC_NOTARY_PROFILE:-}
+    [[ -n "$profile" ]] || fail 'Set VIBEMIC_MAC_NOTARY_PROFILE or the VIBEMIC_MAC_NOTARY_KEY triple.'
+    notary_args=(--keychain-profile "$profile")
+    if [[ -n "${VIBEMIC_MAC_NOTARY_KEYCHAIN:-}" ]]; then
+      notary_args+=(--keychain "$VIBEMIC_MAC_NOTARY_KEYCHAIN")
+    fi
   fi
 fi
 if "$signed"; then
@@ -39,7 +46,10 @@ fi
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
-if [[ ! -x desktop/node_modules/.bin/electron-builder ]]; then npm --prefix desktop ci; fi
+export PATH="$HOME/.cargo/bin:$PATH"
+export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
+command -v cargo >/dev/null || fail 'Install a stable Rust toolchain with rustup.'
+if [[ ! -d desktop/node_modules/@tauri-apps/cli ]]; then npm --prefix desktop ci; fi
 destination="$root/build/source-release/macos"
 if "$distribution"; then destination+="-distribution"
 elif "$signed"; then destination+="-signed"; fi
@@ -67,41 +77,42 @@ verify_signer() {
 
 version=$(node -p 'require("./desktop/package.json").version')
 for arch in "${architectures[@]}"; do
-  output="$stage/$arch"
-  resources="$stage/resources-$arch"
-  config="$stage/electron-builder.json"
-  env -u VIBEMIC_NEMO_RUNTIME -u VIBEMIC_DRAFT_HELPER \
-    VIBEMIC_MAC_ARCH="$arch" VIBEMIC_RESOURCES="$resources" node script/prepare_desktop.mjs
-  node - "$config" "$output" "$resources" "$identity" <<'JS'
-const fs = require('node:fs');
-const { build } = require('./desktop/package.json');
-const [config, output, resources, identity] = process.argv.slice(2);
-build.directories.output = output;
-build.extraResources[0].from = resources;
-build.npmRebuild = false;
-Object.assign(build.mac, { identity, notarize: false, forceCodeSigning: true });
-build.dmg = { artifactName: 'VibeMic-${version}-${arch}.dmg', sign: identity !== '-' };
-fs.writeFileSync(config, JSON.stringify(build));
-JS
-  env -u CSC_LINK -u CSC_NAME -u CSC_KEY_PASSWORD \
-    npm --prefix desktop run dist -- --mac dmg "--$arch" --config "$config"
+  case "$arch" in
+    arm64) target=aarch64-apple-darwin; expected=arm64 ;;
+    x64) target=x86_64-apple-darwin; expected=x86_64 ;;
+  esac
+  rustup target add "$target" >/dev/null
+  env -u VIBEMIC_NEMO_RUNTIME -u VIBEMIC_DRAFT_HELPER -u VIBEMIC_RESOURCES \
+    VIBEMIC_MAC_ARCH="$arch" node script/prepare_desktop.mjs
+  if "$signed"; then
+    export APPLE_SIGNING_IDENTITY="$identity"
+  else
+    export APPLE_SIGNING_IDENTITY=-
+  fi
+  # Tauri stages resources in release/VibeMic without clearing removed files.
+  rm -rf "desktop/src-tauri/target/$target/release/VibeMic"
+  # CI=true skips the Finder AppleScript, matching GitHub Actions runners.
+  env -u CSC_LINK -u CSC_NAME -u CSC_KEY_PASSWORD CI=true \
+    npm --prefix desktop run dist -- --target "$target" --bundles dmg
+  unset APPLE_SIGNING_IDENTITY
 
-  dmg="$output/VibeMic-$version-$arch.dmg"
+  built=$(find "desktop/src-tauri/target/$target/release/bundle/dmg" -name '*.dmg' -type f)
+  [[ -n "$built" && "$built" != *$'\n'* ]] || fail "Expected one DMG for $arch."
+  dmg="$stage/VibeMic-$version-$arch.dmg"
+  mv -f -- "$built" "$dmg"
   hdiutil verify "$dmg"
   hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mount" "$dmg"
   mounted=true
   app="$mount/VibeMic.app"
   contents="$app/Contents"
   packed="$contents/Resources/vibemic"
-  pty="$contents/Resources/app.asar.unpacked/node_modules/node-pty/prebuilds/darwin-$arch"
-  expected="$arch"
-  if [[ "$arch" == x64 ]]; then expected=x86_64; fi
   /usr/bin/codesign --verify --deep --strict "$app"
   verify_signer "$app"
   [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$contents/Info.plist") == "$version" ]] \
     || fail "Unexpected version in $app."
-  for binary in "$contents/MacOS/VibeMic" "$packed/engine/nemo/bin/nemo-speech" \
-      "$packed/engine/vibemic-desktop-draft" "$pty/spawn-helper" "$pty/pty.node"; do
+  executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")
+  for binary in "$contents/MacOS/$executable" "$packed/engine/nemo/bin/nemo-speech" \
+      "$packed/engine/vibemic-desktop-draft"; do
     [[ $(lipo -archs "$binary") == "$expected" ]] || fail "Unexpected architecture in $binary."
     /usr/bin/codesign --verify --strict "$binary"
     verify_signer "$binary"
@@ -112,7 +123,7 @@ JS
     /usr/bin/codesign --verify --strict "$binary"
     verify_signer "$binary"
   done
-  for uf2 in "$resources"/firmware/*.uf2; do cmp "$uf2" "$packed/firmware/${uf2##*/}"; done
+  for uf2 in "$root/build/desktop-resources/firmware/"*.uf2; do cmp "$uf2" "$packed/firmware/${uf2##*/}"; done
   hdiutil detach "$mount" -quiet
   mounted=false
 
