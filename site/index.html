@@ -50,26 +50,42 @@
   </div>
 
   <div class="hero-demo reveal" style="--i:2">
-    <div class="unit" id="unit" data-state="idle">
-      <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
-      <div class="unit-top">
-        <span class="unit-model">PTT-01</span>
-        <span class="unit-sub" data-i18n="unitSub">wireless dictation remote</span>
-        <span class="unit-badges"><span class="sim-badge" data-i18n="simBadge">sim</span><i class="led link on" aria-hidden="true"></i><i class="led rec" aria-hidden="true"></i></span>
+    <div class="unit appwin" id="unit" data-state="idle">
+      <div class="appwin-bar">
+        <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="appwin-brand"><span class="appwin-mark" aria-hidden="true"></span><span class="appwin-word">VIBEMIC</span><span class="appwin-model">VM-01</span></span>
+        <span class="appwin-tools">
+          <span class="sim-badge" data-i18n="simBadge">sim</span>
+          <span class="appwin-icon" id="appwin-sound" aria-hidden="true"><span class="state-dot"></span><svg class="ic" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg></span>
+          <span class="appwin-icon appwin-gear" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24"><path d="M9.5 3h5l.6 2.6 2.3 1.3 2.6-.8 2.5 4.3-2 1.8v2.6l2 1.8-2.5 4.3-2.6-.8-2.3 1.3-.6 2.6h-5l-.6-2.6-2.3-1.3-2.6.8-2.5-4.3 2-1.8v-2.6l-2-1.8 2.5-4.3 2.6.8 2.3-1.3z" transform="translate(2 1) scale(.83)"/><circle cx="12" cy="12.2" r="2.8"/></svg></span>
+        </span>
       </div>
-      <div class="lcd" id="lcd">
-        <div class="lcd-top"><span>PTT-01</span><span class="lcd-status" id="lcd-status">ready</span><span class="lcd-batt" aria-hidden="true">▮▮▮▯</span></div>
-        <div class="lcd-main">
-          <canvas class="lcd-wave" id="wave" width="520" height="104" aria-hidden="true"></canvas>
-          <p class="lcd-message" id="lcd-message">hold to talk</p>
+      <div class="lcd appwin-oled" id="lcd">
+        <div class="oled-status">
+          <span class="led green" id="status-led" aria-hidden="true"></span>
+          <span class="lcd-status" id="lcd-status">ready to record</span>
+          <span class="oled-spacer"></span>
+          <span class="device-pill"><span class="led" aria-hidden="true"></span><span data-i18n="devicePill">VibeMic disconnected</span></span>
+        </div>
+        <p class="oled-hint" id="oled-hint" data-i18n="oledHint">Hold the on-screen button while speaking.</p>
+        <div class="lcd-main appwin-screen">
+          <canvas class="lcd-wave" id="wave" width="520" height="120" aria-hidden="true"></canvas>
+          <p class="lcd-message" id="lcd-message" hidden>hold to talk</p>
+          <p class="lcd-draft" id="lcd-draft" hidden></p>
+          <p class="oled-standby" id="oled-standby" data-i18n="oledStandby">Your draft appears here…</p>
           <p class="lcd-timer" id="lcd-timer">00:00.0</p>
         </div>
-        <div class="lcd-bottom"><span>16 kHz · 16-bit</span><span id="lcd-link">esb · link ok</span></div>
+        <div class="oled-controls">
+          <button class="ptt appwin-ptt" id="ptt" type="button" aria-pressed="false" aria-label="Push to talk — hold to record a simulated draft"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-3 0h6"/></svg></button>
+          <div class="output-seg" id="output-seg" role="group" aria-label="Insert destination">
+            <button type="button" data-output="terminal" aria-pressed="true"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></svg><span data-i18n="segTerminal">Terminal</span></button>
+            <button type="button" data-output="desktop" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v8a3 3 0 0 1-3 3H4m5-5-5 5 5 5"/></svg><span data-i18n="segApp">App</span></button>
+            <button type="button" data-output="manual" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span data-i18n="segDraft">Draft</span></button>
+          </div>
+          <button class="appwin-insert" id="insert-btn" type="button" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></svg><span data-i18n="insertBtn">Insert</span></button>
+          <button class="appwin-copy" id="copy-btn" type="button" disabled><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span data-i18n="copyBtn">Copy</span></button>
+        </div>
       </div>
-      <button class="ptt" id="ptt" type="button" aria-pressed="false" aria-label="Push to talk — hold to record a simulated draft">
-        <span class="ptt-cap" aria-hidden="true">ptt</span>
-      </button>
-      <div class="unit-bottom"><span>mic / pdm 16 kHz</span><span class="unit-hold" data-i18n="unitHold">hold to talk</span><span>link / esb 2 mbps</span></div>
     </div>
 
     <div class="term" id="term">
@@ -77,11 +93,10 @@
       <div class="term-body">
         <p class="term-line term-cmd"><span class="term-prompt" aria-hidden="true">❯</span> claude</p>
         <p class="term-line term-draft" id="term-draft" hidden><span id="draft-text"></span><span class="caret" aria-hidden="true"></span></p>
-        <p class="term-line term-ok" id="term-ok" hidden><span aria-hidden="true">✓</span> <span data-i18n="sentLine">draft inserted — review it in your agent</span></p>
+        <p class="term-line term-ok" id="term-ok" hidden><span aria-hidden="true">✓</span> <span id="term-ok-text" data-i18n="sentLine">draft inserted — review it in your agent</span></p>
       </div>
       <div class="term-foot">
         <span class="term-hint" id="term-hint" data-i18n="hintIdle">hold the orange button · space works too</span>
-        <button class="term-send" id="send-btn" type="button" disabled><span data-i18n="sendBtn">send</span> <span aria-hidden="true">↵</span></button>
       </div>
     </div>
     <p class="demo-note" data-i18n="demoNote">interactive simulation — no microphone is recorded.</p>
@@ -136,7 +151,7 @@
 
 <section class="software-section" id="software"><div class="wrap section software-grid">
   <div class="reveal"><p class="eyebrow"><span data-i18n="appEyebrow">04 / vibemic companion</span><span data-release-version></span></p><h2 data-i18n="appTitle">Your voice.<br>Your local workflow.</h2><p data-i18n="appIntro">VibeMic is Vaibik’s desktop companion for local transcription, firmware flashing, audio diagnostics, and running Claude Code or Codex in its built-in terminal.</p><ul class="features"><li data-i18n="appFeature1">English and Russian interface, independent of dictation language</li><li data-i18n="appFeature2">Separate microphone selection for dictation and calls</li><li data-i18n="appFeature3">Drafts stay editable; sending is your decision</li></ul><a class="text-link" id="release-link" href="https://github.com/nLight/Vaibik/releases" data-i18n="releaseLink">Release notes &amp; all downloads ↗</a></div>
-  <figure class="app-shot reveal" style="--i:1"><img src="assets/app-en.png" width="1140" height="780" alt="English VibeMic companion app overview with a sample draft"><figcaption data-i18n="appCaption">VibeMic 0.1.22 in a demo profile.</figcaption></figure>
+  <figure class="app-shot reveal" style="--i:1"><img src="assets/app-en.png" width="1140" height="780" alt="English VibeMic companion app overview with a sample draft"><figcaption data-i18n="appCaption">VibeMic 0.1.35 in a demo profile.</figcaption></figure>
   <div class="downloads reveal">
     <a class="download" data-release-asset="mac-arm64" href="https://github.com/nLight/Vaibik/releases"><span class="dl-name">macOS <small>Apple Silicon<span data-asset-version></span></small></span><span class="dl-get">dmg ↓</span></a>
     <a class="download" data-release-asset="mac-x64" href="https://github.com/nLight/Vaibik/releases"><span class="dl-name">macOS <small>Intel<span data-asset-version></span></small></span><span class="dl-get">dmg ↓</span></a>
