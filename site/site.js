@@ -5,8 +5,9 @@ const russian = {
   eyebrow:'Стендовый эксперимент с голосовым кодингом',hero1:'Меньше печатать.',hero2:'Больше создавать.',
   intro:'Кнопка, микрофон и следующая идея. Зажмите — говорите. Отпустите — получите черновик в Claude Code или Codex. Проверьте текст и отправьте сами.',
   startBuild:'Собрать самому',viewSource:'Посмотреть исходники ↗',localTranscription:'Локальное распознавание',
-  unitSub:'беспроводной пульт диктовки',simBadge:'демо',unitHold:'зажмите — говорите',
-  termTitle:'claude · демо vibemic',sentLine:'черновик вставлен — проверьте его в агенте',sendBtn:'отправить',
+  simBadge:'демо',devicePill:'VibeMic не подключён',oledHint:'Удерживайте экранную кнопку, пока говорите.',oledStandby:'Здесь появится текст диктовки…',
+  segTerminal:'Терминал',segApp:'Приложение',segDraft:'Черновик',insertBtn:'Вставить',copyBtn:'Копировать',
+  termTitle:'claude · демо vibemic',sentLine:'черновик вставлен — проверьте его в агенте',
   hintIdle:'зажмите оранжевую кнопку · пробел тоже работает',demoNote:'интерактивная симуляция — микрофон не записывается.',
   heroCaption:'Покомпонентный рендер прототипа. Для сборки используйте точную схему ниже.',stamp:'без корпуса. только провода.',
   flowHold:'01 / зажмите ptt',flowRadio:'02 / радио → usb',flowDraft:'03 / распознавание',flowSend:'04 / проверьте и отправьте',
@@ -28,7 +29,7 @@ const russian = {
   appEyebrow:'04 / приложение vibemic',appTitle:'Ваш голос.\nВаш локальный процесс.',
   appIntro:'В VibeMic можно локально распознавать речь, прошивать Vaibik, проверять аудио и запускать Claude Code или Codex во встроенном терминале.',
   appFeature1:'Русский и английский интерфейс независимо от языка диктовки',appFeature2:'Отдельный выбор микрофона для диктовки и звонков',
-  appFeature3:'Черновики можно редактировать; отправляете вы',releaseLink:'Что нового и все загрузки ↗',appCaption:'VibeMic 0.1.22 в демопрофиле.',
+  appFeature3:'Черновики можно редактировать; отправляете вы',releaseLink:'Что нового и все загрузки ↗',appCaption:'VibeMic 0.1.35 в демопрофиле.',
   downloadNote:'Для актуальных сборок нужна macOS 13.3 или новее. Подробности о пакетах есть в примечаниях к релизу.',
   statusEyebrow:'05 / честный журнал стенда',statusTitle:'Основа уже работает.\nЭто всё ещё прототип.',tested:'проверено',pending:'следующее на стенде',
   statusTested:'USB Audio + HID, записанная речь через радиопару, локальное распознавание и вставка черновика во встроенный терминал.',
@@ -37,11 +38,15 @@ const russian = {
 };
 
 const demoStrings = {
-  en:{idle:'hold to talk',ready:'ready',busy:'transcribing…',dsp:'dsp',draft:'draft ready',ok:'ok',sent:'sent ↵',tx:'tx',link:'esb · link ok',
-      hintIdle:'hold the orange button · space works too',hintRec:'listening… release to transcribe',hintBusy:'transcribing locally…',hintDraft:'review the draft, then send',hintSent:'inserted into the agent',
+  en:{statusReady:'ready to record',statusRec:'recording',statusBusy:'transcribing',statusDraft:'draft ready',statusSent:'inserted',
+      msgBusy:'transcribing…',msgSent:'inserted ✓',
+      hintIdle:'Hold the on-screen button while speaking.',hintRec:'Release to transcribe.',hintBusy:'Transcribing locally…',hintDraft:'Review the draft, then insert.',hintSent:'Inserted into the agent.',
+      insertBtn:'Insert',pasteBtn:'Paste',copyBtn:'Copy',copied:'Copied',pastedLine:'pasted into the active app',sentLine:'draft inserted — review it in your agent',
       pttAria:'Push to talk — hold to record a simulated draft',soundOn:'Mute interface sounds',soundOff:'Unmute interface sounds'},
-  ru:{idle:'зажмите — говорите',ready:'готов',busy:'распознавание…',dsp:'dsp',draft:'черновик готов',ok:'ок',sent:'отправлено ↵',tx:'tx',link:'esb · связь ок',
-      hintIdle:'зажмите оранжевую кнопку · пробел тоже работает',hintRec:'слушаю… отпустите для распознавания',hintBusy:'локальное распознавание…',hintDraft:'проверьте черновик и отправьте',hintSent:'вставлено в агент',
+  ru:{statusReady:'готов к записи',statusRec:'идёт запись',statusBusy:'распознавание',statusDraft:'черновик готов',statusSent:'вставлено',
+      msgBusy:'распознавание…',msgSent:'вставлено ✓',
+      hintIdle:'Удерживайте экранную кнопку, пока говорите.',hintRec:'Отпустите для распознавания.',hintBusy:'Локальное распознавание…',hintDraft:'Проверьте черновик и вставьте.',hintSent:'Вставлено в агент.',
+      insertBtn:'Вставить',pasteBtn:'Вставить',copyBtn:'Копировать',copied:'Скопировано',pastedLine:'вставлено в активное приложение',sentLine:'черновик вставлен — проверьте его в агенте',
       pttAria:'Push-to-talk — удерживайте для записи демо-черновика',soundOn:'Выключить звуки интерфейса',soundOff:'Включить звуки интерфейса'}
 };
 
@@ -67,13 +72,18 @@ const unit = document.getElementById('unit');
 const ptt = document.getElementById('ptt');
 const lcdMessage = document.getElementById('lcd-message');
 const lcdStatus = document.getElementById('lcd-status');
-const lcdLink = document.getElementById('lcd-link');
 const lcdTimer = document.getElementById('lcd-timer');
-const termHint = document.getElementById('term-hint');
+const lcdDraft = document.getElementById('lcd-draft');
+const statusLed = document.getElementById('status-led');
+const oledHint = document.getElementById('oled-hint');
+const oledStandby = document.getElementById('oled-standby');
+const outputSeg = document.getElementById('output-seg');
+const insertBtn = document.getElementById('insert-btn');
+const copyBtn = document.getElementById('copy-btn');
 const termDraft = document.getElementById('term-draft');
 const termOk = document.getElementById('term-ok');
+const termOkText = document.getElementById('term-ok-text');
 const draftText = document.getElementById('draft-text');
-const sendBtn = document.getElementById('send-btn');
 const soundBtn = document.getElementById('sound-toggle');
 
 /* ---- language ---- */
@@ -94,9 +104,13 @@ function setLanguage(next) {
   document.querySelectorAll('.brand').forEach(b => b.setAttribute('aria-label', language === 'ru' ? 'Vaibik — в начало' : 'Vaibik home'));
   document.querySelector('.wiring-figure a').setAttribute('aria-label', language === 'ru' ? 'Открыть схему в полном размере' : 'Open full-size wiring reference');
   document.querySelector('.hero-image').alt = language === 'ru' ? 'Иллюстрация макетного передатчика с микрофоном и кнопкой PTT и отдельного USB-донгла' : 'Illustrated bare breadboard transmitter with microphone and PTT button, and a separate USB receiver';
-  document.querySelector('.app-shot img').alt = language === 'ru' ? 'Английский интерфейс приложения VibeMic, демопрофиль' : 'English VibeMic companion app overview, demo profile';
+  const appShot = document.querySelector('.app-shot img');
+  appShot.src = language === 'ru' ? 'assets/app-ru.png' : 'assets/app-en.png';
+  appShot.alt = language === 'ru' ? 'Русский интерфейс приложения VibeMic с примером черновика' : 'English VibeMic companion app overview with a sample draft';
   ptt.setAttribute('aria-label', demoStrings[language].pttAria);
   soundBtn.setAttribute('aria-label', soundOn ? demoStrings[language].soundOn : demoStrings[language].soundOff);
+  const segNames = { terminal:['Terminal','Терминал'], desktop:['App','Приложение'], manual:['Draft','Черновик'] };
+  outputSeg.querySelectorAll('button').forEach(b => b.setAttribute('aria-label', segNames[b.dataset.output][language === 'ru' ? 1 : 0]));
   applyDemoStrings();
   selectPart(activePart);
   try { localStorage.setItem('vaibik-language', language); } catch {}
@@ -148,6 +162,7 @@ function renderSoundButton() {
   soundBtn.setAttribute('aria-pressed', String(soundOn));
   soundBtn.querySelector('.led').classList.toggle('on', soundOn);
   soundBtn.setAttribute('aria-label', soundOn ? demoStrings[language].soundOn : demoStrings[language].soundOff);
+  unit.classList.toggle('muted', !soundOn);
 }
 soundBtn.addEventListener('click', () => {
   soundOn = !soundOn;
@@ -158,19 +173,38 @@ soundBtn.addEventListener('click', () => {
 
 /* ---- PTT demo state machine ---- */
 let state = 'idle';
+let outputMode = 'terminal';
 let recStart = 0;
 let phraseIndex = 0;
 let currentPhrase = '';
-let busyTimer = 0, typeTimer = 0, sentTimer = 0;
+let busyTimer = 0, typeTimer = 0, sentTimer = 0, copyTimer = 0;
 
+function updateControls() {
+  const s = demoStrings[language];
+  const hasDraft = state === 'draft';
+  copyBtn.disabled = !hasDraft;
+  insertBtn.hidden = !hasDraft || outputMode === 'manual';
+  insertBtn.querySelector('span').textContent = outputMode === 'desktop' ? s.pasteBtn : s.insertBtn;
+}
 function applyDemoStrings() {
   const s = demoStrings[language];
-  lcdLink.textContent = s.link;
-  if (state === 'idle') { lcdMessage.textContent = s.idle; lcdStatus.textContent = s.ready; termHint.textContent = s.hintIdle; }
-  else if (state === 'rec') { lcdStatus.textContent = '● rec'; termHint.textContent = s.hintRec; }
-  else if (state === 'busy') { lcdMessage.textContent = s.busy; lcdStatus.textContent = s.dsp; termHint.textContent = s.hintBusy; }
-  else if (state === 'draft') { lcdMessage.textContent = s.draft; lcdStatus.textContent = s.ok; termHint.textContent = s.hintDraft; }
-  else if (state === 'sent') { lcdMessage.textContent = s.sent; lcdStatus.textContent = s.tx; termHint.textContent = s.hintSent; }
+  if (state === 'idle') {
+    lcdStatus.textContent = s.statusReady; statusLed.className = 'led green'; oledHint.textContent = s.hintIdle;
+    lcdMessage.hidden = true; lcdDraft.hidden = true; oledStandby.hidden = false;
+  } else if (state === 'rec') {
+    lcdStatus.textContent = s.statusRec; statusLed.className = 'led rec'; oledHint.textContent = s.hintRec;
+    lcdMessage.hidden = true; lcdDraft.hidden = true; oledStandby.hidden = true;
+  } else if (state === 'busy') {
+    lcdStatus.textContent = s.statusBusy; statusLed.className = 'led amber'; oledHint.textContent = s.hintBusy;
+    lcdMessage.textContent = s.msgBusy; lcdMessage.hidden = false; lcdDraft.hidden = true; oledStandby.hidden = true;
+  } else if (state === 'draft') {
+    lcdStatus.textContent = s.statusDraft; statusLed.className = 'led green'; oledHint.textContent = s.hintDraft;
+    lcdMessage.hidden = true; lcdDraft.hidden = false; oledStandby.hidden = true;
+  } else if (state === 'sent') {
+    lcdStatus.textContent = s.statusSent; statusLed.className = 'led green'; oledHint.textContent = s.hintSent;
+    lcdMessage.textContent = s.msgSent; lcdMessage.hidden = false; lcdDraft.hidden = true; oledStandby.hidden = true;
+  }
+  updateControls();
 }
 function setState(next) {
   state = next;
@@ -198,39 +232,53 @@ function endRec() {
 }
 function showDraft() {
   termOk.hidden = true;
-  termDraft.hidden = false;
-  draftText.textContent = '';
-  sendBtn.disabled = false;
+  termDraft.hidden = true;
+  lcdDraft.textContent = '';
   blip(880, 0.07, 'sine', 0.05);
   setTimeout(() => blip(1320, 0.09, 'sine', 0.05), 80);
   clearInterval(typeTimer);
-  if (reduced) { draftText.textContent = currentPhrase; return; }
+  if (reduced) { lcdDraft.textContent = currentPhrase; return; }
   let i = 0;
   typeTimer = setInterval(() => {
     i += 1;
-    draftText.textContent = currentPhrase.slice(0, i);
+    lcdDraft.textContent = currentPhrase.slice(0, i);
     if (i >= currentPhrase.length) clearInterval(typeTimer);
   }, 22);
 }
 function send() {
-  if (state !== 'draft') return;
+  if (state !== 'draft' || outputMode === 'manual') return;
   clearInterval(typeTimer);
+  lcdDraft.textContent = currentPhrase;
   draftText.textContent = currentPhrase;
-  termDraft.hidden = true;
+  termDraft.hidden = false;
+  termOkText.textContent = outputMode === 'desktop' ? demoStrings[language].pastedLine : demoStrings[language].sentLine;
   termOk.hidden = false;
-  sendBtn.disabled = true;
   blip(660, 0.09, 'sine', 0.05);
   setState('sent');
   clearTimeout(sentTimer);
   sentTimer = setTimeout(resetDemo, reduced ? 500 : 1700);
 }
 function resetDemo() {
-  clearTimeout(busyTimer); clearInterval(typeTimer); clearTimeout(sentTimer);
+  clearTimeout(busyTimer); clearInterval(typeTimer); clearTimeout(sentTimer); clearTimeout(copyTimer);
   termDraft.hidden = true;
   termOk.hidden = true;
   draftText.textContent = '';
-  sendBtn.disabled = true;
+  lcdDraft.textContent = '';
+  copyBtn.classList.remove('ok');
+  copyBtn.querySelector('span').textContent = demoStrings[language].copyBtn;
   setState('idle');
+}
+function copyDraft() {
+  if (state !== 'draft') return;
+  clearInterval(typeTimer);
+  lcdDraft.textContent = currentPhrase;
+  if (navigator.clipboard) navigator.clipboard.writeText(currentPhrase).catch(() => {});
+  blip(1320, 0.08, 'sine', 0.05);
+  const span = copyBtn.querySelector('span');
+  span.textContent = demoStrings[language].copied;
+  copyBtn.classList.add('ok');
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => { span.textContent = demoStrings[language].copyBtn; copyBtn.classList.remove('ok'); }, 1300);
 }
 
 ptt.addEventListener('pointerdown', e => { e.preventDefault(); try { ptt.setPointerCapture(e.pointerId); } catch {} startRec(); });
@@ -239,7 +287,15 @@ ptt.addEventListener('pointercancel', endRec);
 ptt.addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); startRec(); } });
 ptt.addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); endRec(); } });
 window.addEventListener('blur', () => { if (state === 'rec') endRec(); });
-sendBtn.addEventListener('click', send);
+insertBtn.addEventListener('click', send);
+copyBtn.addEventListener('click', copyDraft);
+outputSeg.querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
+  outputMode = button.dataset.output;
+  outputSeg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+  ensureAudio();
+  blip(900, 0.04, 'square', 0.03);
+  updateControls();
+}));
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && state === 'draft' && (e.target === document.body || e.target === ptt)) { e.preventDefault(); send(); }
 });
@@ -261,7 +317,7 @@ function sizeWave() {
   waveW = rect.width; waveH = rect.height;
 }
 function drawWave(now) {
-  if (now - lastTarget > 70) {
+  if (!reduced && now - lastTarget > 70) {
     lastTarget = now;
     const burst = Math.random() < 0.72 ? 1 : 0.22;
     for (let i = 0; i < BARS; i++) {
@@ -285,6 +341,7 @@ function startWave() {
   sizeWave();
   if (rafId) return;
   lastTarget = 0;
+  if (reduced) for (let i = 0; i < BARS; i++) waveTargets[i] = Math.max(0.05, (0.25 + 0.75 * ((i * 37) % 17) / 17) * (0.55 + 0.45 * Math.sin(i * 0.35)));
   rafId = requestAnimationFrame(drawWave);
 }
 function stopWave() {

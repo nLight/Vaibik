@@ -89,41 +89,71 @@ h3{font-size:18px;font-weight:600;letter-spacing:-.01em;margin-bottom:12px}
 
 /* demo unit */
 .hero-demo{display:flex;flex-direction:column;gap:16px;min-width:0}
-.unit{position:relative;background:var(--plate);border:1px solid var(--line-2);border-radius:20px;padding:22px 24px 20px;box-shadow:0 30px 60px -34px rgba(25,24,19,.55),inset 0 1px 0 #fff}
-.screw{position:absolute;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#cfccc3,#8a867b 70%);box-shadow:inset 0 0 0 1px #00000022}
-.screw::after{content:"";position:absolute;left:1px;right:1px;top:4px;height:1px;background:#00000044;transform:rotate(35deg)}
-.screw.tl{top:11px;left:11px}.screw.tr{top:11px;right:11px}.screw.bl{bottom:11px;left:11px}.screw.br{bottom:11px;right:11px}
-.unit-top{display:flex;align-items:center;gap:12px;padding:0 6px}
-.unit-model{font:700 14px var(--mono);letter-spacing:.5px}
-.unit-sub{font:500 10px var(--mono);color:var(--ink-3);text-transform:uppercase;letter-spacing:.5px}
-.unit-badges{margin-left:auto;display:flex;align-items:center;gap:8px}
+/* interactive VibeMic app window */
+[hidden]{display:none!important}
+.unit.appwin{position:relative;background:#e6e4df;border:1px solid var(--line-2);border-radius:14px;padding:0;overflow:hidden;box-shadow:0 30px 60px -34px rgba(25,24,19,.55),inset 0 1px 0 #fff}
+.appwin .ic{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.appwin-bar{display:flex;align-items:center;gap:12px;padding:13px 16px}
+.traffic{display:flex;gap:7px;flex:none}
+.traffic i{width:11px;height:11px;border-radius:50%}
+.traffic i:nth-child(1){background:#ff5f57}.traffic i:nth-child(2){background:#febc2e}.traffic i:nth-child(3){background:#28c840}
+.appwin-brand{display:flex;align-items:center;gap:9px;min-width:0}
+.appwin-mark{position:relative;width:22px;height:22px;border-radius:6px;background:linear-gradient(160deg,#ff7a3c,var(--orange) 60%,var(--orange-2));box-shadow:inset 0 1px 2px #ffffff66,0 1px 2px #00000022;flex:none}
+.appwin-mark::after{content:"";position:absolute;left:6px;right:6px;top:10px;height:2.5px;border-radius:2px;background:#fff}
+.appwin-word{font:700 15px var(--mono);letter-spacing:2px;color:var(--ink);white-space:nowrap}
+.appwin-model{font:600 9px var(--mono);letter-spacing:1px;color:var(--ink-3);border:1px solid var(--line-2);border-radius:5px;padding:2px 6px;white-space:nowrap}
+.appwin-tools{margin-left:auto;display:flex;align-items:center;gap:8px}
 .sim-badge{font:600 9px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--orange);border:1px solid var(--orange);border-radius:4px;padding:2px 6px}
-.unit[data-state="rec"] .led.rec{animation:blink .9s steps(1) infinite;box-shadow:0 0 8px #e03a2f88}
-@keyframes blink{50%{opacity:.25;box-shadow:none}}
+.appwin-icon{position:relative;display:grid;place-items:center;width:30px;height:30px;border:1px solid var(--line-2);border-radius:8px;color:var(--ink-2);background:#efede8}
+.appwin-icon .ic{width:15px;height:15px}
+.appwin-icon .state-dot{position:absolute;top:4px;right:4px;width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 5px #1f9d5588}
+.unit.muted .appwin-icon .state-dot{background:var(--ink-3);box-shadow:none}
 
-.lcd{position:relative;margin:18px 0 6px;background:linear-gradient(180deg,var(--screen),var(--screen-2));border-radius:10px;border:1px solid #000;box-shadow:inset 0 2px 10px #000c,inset 0 0 0 1px #ffffff0d;padding:12px 16px;overflow:hidden}
+.lcd{position:relative;background:linear-gradient(180deg,var(--screen),var(--screen-2));border-radius:10px;border:1px solid #000;box-shadow:inset 0 2px 10px #000c,inset 0 0 0 1px #ffffff0d;padding:12px 16px;overflow:hidden}
 .lcd::after{content:"";position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(circle,#00000055 1px,transparent 1.4px);background-size:3px 3px;opacity:.5}
-.lcd-top,.lcd-bottom{display:flex;justify-content:space-between;align-items:center;font:500 9px var(--mono);letter-spacing:.5px;color:#7f927a;text-transform:uppercase;position:relative;z-index:1}
+.appwin-oled{margin:0 14px 14px;border-radius:14px;padding:14px 16px 16px}
+.oled-status{display:flex;align-items:center;gap:8px;font:600 10px var(--mono);letter-spacing:1.2px;text-transform:uppercase;color:#8fa189;position:relative;z-index:1}
 .lcd-status{color:var(--phosphor)}
 .unit[data-state="rec"] .lcd-status{color:var(--red)}
 .unit[data-state="draft"] .lcd-status,.unit[data-state="sent"] .lcd-status{color:var(--green)}
-.lcd-batt{letter-spacing:1px}
-.lcd-main{position:relative;height:104px;margin:8px 0;display:flex;align-items:center;justify-content:center;z-index:1}
+.oled-spacer{flex:1}
+.device-pill{display:flex;align-items:center;gap:7px;font:500 9px var(--mono);letter-spacing:.5px;color:#9b988c;border:1px solid #ffffff1f;background:#ffffff0a;border-radius:20px;padding:4px 10px;white-space:nowrap}
+.device-pill .led{width:6px;height:6px;background:#6b6f66}
+.oled-hint{margin:7px 0 0;font:400 12px/1.5 var(--sans);color:#7f927a;position:relative;z-index:1}
+.lcd-main{position:relative;display:flex;z-index:1}
+.appwin-screen{height:132px;margin:10px 0 0;align-items:flex-start;justify-content:flex-start}
 .lcd-wave{position:absolute;inset:0;width:100%;height:100%;opacity:0;transition:opacity .2s}
-.lcd-message{font:600 22px var(--mono);letter-spacing:2px;color:var(--phosphor);text-transform:uppercase;text-align:center;text-shadow:0 0 12px #d7e8cf33}
-.lcd-timer{position:absolute;right:0;bottom:-2px;font:600 26px var(--mono);color:var(--orange);letter-spacing:1px;opacity:0;text-shadow:0 0 12px #ff4d0044;padding-left:30px;background:linear-gradient(90deg,transparent,var(--screen-2) 55%)}
+.lcd-message{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;margin:0;font:600 20px var(--mono);letter-spacing:2px;color:var(--phosphor);text-transform:uppercase;text-align:center;text-shadow:0 0 12px #d7e8cf33}
+.lcd-draft{position:relative;margin:0;font:500 17px/1.5 var(--sans);color:#f2f1ec;word-break:break-word;text-align:left}
+.lcd-draft::after{content:"";display:inline-block;width:2px;height:17px;background:var(--orange);vertical-align:-3px;margin-left:2px;animation:caret 1s steps(1) infinite}
+.oled-standby{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;margin:0;font:400 14px var(--sans);color:#5f6f5b;text-align:center}
+.lcd-timer{position:absolute;right:0;bottom:-2px;font:600 24px var(--mono);color:var(--orange);letter-spacing:1px;opacity:0;text-shadow:0 0 12px #ff4d0044;padding-left:30px;background:linear-gradient(90deg,transparent,var(--screen-2) 55%)}
 .unit[data-state="rec"] .lcd-wave{opacity:1}
-.unit[data-state="rec"] .lcd-message{opacity:0}
 .unit[data-state="rec"] .lcd-timer{opacity:1}
 .unit[data-state="busy"] .lcd-message{animation:pulse 1s ease-in-out infinite}
+.unit[data-state="rec"] .led.rec{animation:blink .9s steps(1) infinite;box-shadow:0 0 8px #e03a2f88}
+@keyframes blink{50%{opacity:.25;box-shadow:none}}
 @keyframes pulse{50%{opacity:.45}}
 
-.ptt{display:block;margin:14px auto 12px;width:132px;height:132px;border-radius:50%;border:1px solid var(--orange-2);cursor:pointer;background:radial-gradient(circle at 38% 30%,#ff7a3c,var(--orange) 55%,var(--orange-2));box-shadow:0 10px 22px -10px #e0430099,inset 0 2px 4px #ffffff66,inset 0 -6px 12px #00000033,0 0 0 6px var(--plate),0 0 0 7px var(--line);transition:transform .1s ease,box-shadow .1s ease,filter .1s;touch-action:none;user-select:none}
-.ptt-cap{font:700 15px var(--mono);letter-spacing:2px;color:#fff;text-transform:uppercase;text-shadow:0 1px 2px #00000044;pointer-events:none}
-.ptt:hover{filter:brightness(1.04)}
-.ptt:active,.unit[data-state="rec"] .ptt{transform:translateY(3px) scale(.97);box-shadow:0 4px 10px -6px #e0430099,inset 0 3px 8px #00000055,0 0 0 6px var(--plate),0 0 0 7px var(--line);filter:brightness(.94)}
-.unit-bottom{display:flex;justify-content:space-between;gap:10px;font:500 9px var(--mono);text-transform:uppercase;letter-spacing:.5px;color:var(--ink-3);padding:0 6px}
-.unit-hold{color:var(--orange)}
+.oled-controls{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid #ffffff14;position:relative;z-index:1}
+.appwin-ptt{display:grid;place-items:center;width:52px;height:52px;margin:0;border-radius:50%;border:1px solid var(--orange-2);cursor:pointer;color:#fff;background:radial-gradient(circle at 38% 30%,#ff7a3c,var(--orange) 55%,var(--orange-2));box-shadow:0 8px 16px -8px #e0430099,inset 0 2px 4px #ffffff66,inset 0 -5px 10px #00000033;transition:transform .1s ease,box-shadow .1s ease,filter .1s;touch-action:none;user-select:none;flex:none}
+.appwin-ptt .ic{width:20px;height:20px}
+.appwin-ptt:hover{filter:brightness(1.05)}
+.appwin-ptt:active,.unit[data-state="rec"] .appwin-ptt{transform:translateY(2px) scale(.96);box-shadow:0 3px 8px -5px #e0430099,inset 0 3px 8px #00000055;filter:brightness(.94)}
+.output-seg{display:flex;gap:2px;background:#ffffff0d;border:1px solid #ffffff1a;border-radius:9px;padding:3px}
+.output-seg button{display:flex;align-items:center;gap:6px;border:0;background:transparent;border-radius:6px;padding:7px 10px;font:600 10px var(--mono);letter-spacing:.3px;color:#9b988c;cursor:pointer;transition:background .15s,color .15s}
+.output-seg button .ic{width:13px;height:13px}
+.output-seg button[aria-pressed="true"]{background:#ffffff1f;color:#fff}
+.output-seg button:hover{color:#d8d4c8}
+.appwin-insert{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--orange-2);background:var(--orange);color:#fff;border-radius:8px;padding:9px 14px;font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.5px;cursor:pointer;transition:background .15s,transform .1s}
+.appwin-insert .ic{width:13px;height:13px}
+.appwin-insert:hover{background:var(--orange-2)}
+.appwin-insert:active{transform:translateY(1px)}
+.appwin-copy{display:inline-flex;align-items:center;gap:7px;border:1px solid #ffffff22;background:transparent;color:#cfcabb;border-radius:8px;padding:9px 12px;font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.5px;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.appwin-copy .ic{width:13px;height:13px}
+.appwin-copy:not(:disabled):hover{border-color:#ffffff44;color:#fff}
+.appwin-copy:disabled{opacity:.45;cursor:default}
+.appwin-copy.ok{border-color:var(--green);color:var(--green)}
 
 .term{background:var(--screen-2);border:1px solid var(--dark-line);border-radius:10px;overflow:hidden;box-shadow:0 20px 40px -30px rgba(25,24,19,.6)}
 .term-bar{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--dark-line);background:var(--dark-2)}
@@ -142,10 +172,6 @@ h3{font-size:18px;font-weight:600;letter-spacing:-.01em;margin-bottom:12px}
 .term-ok{color:var(--green)}
 .term-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-top:1px solid var(--dark-line)}
 .term-hint{font:400 10px/1.5 var(--mono);color:var(--dark-muted)}
-.term-send{display:inline-flex;align-items:center;gap:7px;background:var(--dark-2);border:1px solid var(--dark-line);border-radius:6px;color:var(--dark-muted);font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.5px;padding:8px 14px;cursor:pointer;transition:background .2s,color .2s,border-color .2s}
-.term-send:not(:disabled){background:var(--orange);border-color:var(--orange-2);color:#fff}
-.term-send:not(:disabled):hover{background:var(--orange-2)}
-.term-send:disabled{cursor:default;opacity:.6}
 .demo-note{font:400 10px/1.6 var(--mono);color:var(--ink-3);text-align:center}
 
 /* bench plate */
@@ -284,6 +310,8 @@ td:first-child{white-space:nowrap}
   h1{font-size:clamp(46px,12vw,72px)}
   .intro{font-size:15px;max-width:520px}
   .hero-demo{max-width:440px;margin:0 auto;width:100%}
+  .output-seg button span{display:none}
+  .output-seg button{padding:7px 9px}
   .signal{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;padding:20px}
   .signal>span[aria-hidden]{display:none}
   .section{padding-top:60px;padding-bottom:60px}
@@ -305,9 +333,14 @@ td:first-child{white-space:nowrap}
 @media(max-width:480px){
   .downloads{grid-template-columns:1fr}
   .download{border-left:0}
-  .unit{padding:18px 16px 16px}
-  .ptt{width:116px;height:116px}
-  .lcd-message{font-size:18px}
+  .appwin-screen{height:112px}
+  .appwin-word{font-size:13px;letter-spacing:1px}
+  .appwin-gear{display:none}
+  .device-pill{display:none}
+  .lcd-message{font-size:17px}
+  .lcd-draft{font-size:15px}
+  .oled-controls{gap:8px}
+  .appwin-insert,.appwin-copy{padding:8px 10px}
   .hero-specs{gap:8px}
   .actions{gap:18px}
 }
