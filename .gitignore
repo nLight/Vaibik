@@ -1,6 +1,9 @@
 /build/
 /.venv/
 /desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/schemas/
 __pycache__/
 *.wav
 .DS_Store
