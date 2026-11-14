@@ -1,9 +1,45 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 
 const TARGET_RATE: u32 = 16_000;
+const DONGLE_NAME: &str = "ptt dictation mic";
+
+static PREFERRED: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn preferred() -> &'static Mutex<Option<String>> {
+    PREFERRED.get_or_init(|| Mutex::new(None))
+}
+
+pub fn set_preferred(name: Option<String>) {
+    *preferred().lock().unwrap() = name;
+}
+
+pub fn input_names() -> Vec<String> {
+    let host = cpal::default_host();
+    host.input_devices()
+        .map(|devices| devices.filter_map(|device| device.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+fn pick_input(host: &cpal::Host) -> Option<cpal::Device> {
+    let chosen = preferred().lock().unwrap().clone();
+    if let Ok(devices) = host.input_devices() {
+        let devices: Vec<_> = devices.collect();
+        if let Some(name) = chosen {
+            if let Some(device) = devices.into_iter().find(|device| device.name().ok().as_deref() == Some(name.as_str())) {
+                return Some(device);
+            }
+        } else if let Some(device) = devices
+            .into_iter()
+            .find(|device| device.name().map(|name| name.to_lowercase().contains(DONGLE_NAME)).unwrap_or(false))
+        {
+            return Some(device);
+        }
+    }
+    host.default_input_device()
+}
 
 pub struct Recorder {
     stream: cpal::Stream,
@@ -15,7 +51,7 @@ pub struct Recorder {
 impl Recorder {
     pub fn start() -> Result<Self, String> {
         let host = cpal::default_host();
-        let device = host.default_input_device().ok_or("Микрофон не найден.")?;
+        let device = pick_input(&host).ok_or("Микрофон не найден.")?;
         let supported = device.default_input_config().map_err(|error| error.to_string())?;
         let rate = supported.sample_rate().0;
         let channels = supported.channels();

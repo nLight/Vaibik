@@ -2,21 +2,40 @@ mod audio;
 mod dictation;
 mod engine;
 mod faceplate;
+mod hid;
 mod hotkey;
 mod insert;
+mod sound;
 
 use std::time::Duration;
 
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 
 actions!(vibemic, [Quit]);
 
-struct Universal;
+struct Universal {
+    draft: Option<Entity<TextareaState>>,
+    last_transcript: String,
+    settings: bool,
+    mics: Vec<String>,
+    mic_choice: Option<String>,
+}
+
+impl Universal {
+    fn draft_text(&self, cx: &App) -> String {
+        self.draft
+            .as_ref()
+            .map(|draft| draft.read(cx).value().to_string())
+            .unwrap_or_default()
+    }
+}
 
 impl Render for Universal {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let snap = dictation::snapshot();
-        faceplate::render(&snap, cx)
+        faceplate::render(&snap, window, self, cx)
     }
 }
 
@@ -34,8 +53,10 @@ fn main() {
     }
     gpui_kit::application().run(|cx| {
         gpui_kit::init(cx);
+        Theme::global_mut(cx).mode = ThemeMode::Dark;
         dictation::start();
         hotkey::install();
+        hid::spawn();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: point(px(140.0), px(140.0)),
@@ -48,7 +69,13 @@ fn main() {
             ..Default::default()
         };
         gpui_kit::open_window(options, cx, |_, cx| {
-            let entity = cx.new(|_| Universal);
+            let entity = cx.new(|_| Universal {
+                draft: None,
+                last_transcript: String::new(),
+                settings: false,
+                mics: Vec::new(),
+                mic_choice: None,
+            });
             let weak = entity.downgrade();
             cx.spawn(async move |cx| {
                 loop {

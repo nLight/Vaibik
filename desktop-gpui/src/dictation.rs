@@ -1,13 +1,16 @@
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, OnceLock};
 
-use crate::{audio, engine, insert};
+use crate::{audio, engine, insert, sound};
 
 pub enum Command {
     Toggle,
-    Copy,
-    InsertNow,
+    Start,
+    Stop,
+    CopyText(String),
+    InsertText(String),
     SetInsertMode(bool),
+    SetSound(bool),
 }
 
 #[derive(Clone)]
@@ -17,6 +20,7 @@ pub struct Snapshot {
     pub recording: bool,
     pub busy: bool,
     pub insert_mode: bool,
+    pub sound: bool,
 }
 
 struct Shared {
@@ -25,6 +29,7 @@ struct Shared {
     recording: bool,
     busy: bool,
     insert_mode: bool,
+    sound: bool,
 }
 
 static SHARED: OnceLock<Mutex<Shared>> = OnceLock::new();
@@ -38,13 +43,14 @@ fn shared() -> &'static Mutex<Shared> {
             recording: false,
             busy: false,
             insert_mode: true,
+            sound: true,
         })
     })
 }
 
 fn initial_status() -> String {
     if engine::model_installed() {
-        "Модель Parakeet установлена. Зажмите горячую клавишу или нажмите «Запись».".into()
+        "Модель Parakeet установлена. Зажмите горячую клавишу или кнопку передатчика.".into()
     } else {
         "Модель Parakeet не установлена.".into()
     }
@@ -52,6 +58,16 @@ fn initial_status() -> String {
 
 fn set_status(text: impl Into<String>) {
     shared().lock().unwrap().status = text.into();
+}
+
+fn sound_enabled() -> bool {
+    shared().lock().unwrap().sound
+}
+
+fn cue(kind: &str) {
+    if sound_enabled() {
+        sound::play(kind);
+    }
 }
 
 pub fn snapshot() -> Snapshot {
@@ -62,6 +78,7 @@ pub fn snapshot() -> Snapshot {
         recording: guard.recording,
         busy: guard.busy,
         insert_mode: guard.insert_mode,
+        sound: guard.sound,
     }
 }
 
@@ -83,45 +100,24 @@ fn controller(rx: mpsc::Receiver<Command>) {
     while let Ok(command) = rx.recv() {
         match command {
             Command::Toggle => {
-                if shared().lock().unwrap().busy {
-                    continue;
-                }
                 if recorder.is_some() {
-                    let rec = recorder.take().unwrap();
-                    shared().lock().unwrap().recording = false;
-                    match rec.stop() {
-                        Ok(wav) => {
-                            shared().lock().unwrap().busy = true;
-                            set_status("Распознавание Parakeet…");
-                            let insert_mode = shared().lock().unwrap().insert_mode;
-                            std::thread::spawn(move || finish(wav, target_pid, insert_mode));
-                        }
-                        Err(error) => set_status(format!("Запись не удалась: {error}")),
-                    }
+                    stop_recording(&mut recorder, target_pid);
                 } else {
-                    target_pid = insert::frontmost_pid();
-                    match audio::Recorder::start() {
-                        Ok(rec) => {
-                            recorder = Some(rec);
-                            shared().lock().unwrap().recording = true;
-                            set_status("Идёт запись… отпустите, чтобы распознать.");
-                        }
-                        Err(error) => set_status(format!("Не удалось начать запись: {error}")),
-                    }
+                    begin_recording(&mut recorder, &mut target_pid);
                 }
             }
-            Command::Copy => {
-                let text = shared().lock().unwrap().transcript.clone();
-                if !text.is_empty() {
+            Command::Start => begin_recording(&mut recorder, &mut target_pid),
+            Command::Stop => stop_recording(&mut recorder, target_pid),
+            Command::CopyText(text) => {
+                if !text.trim().is_empty() {
                     set_status(match insert::write_clipboard(&text) {
                         Ok(()) => "Скопировано в буфер обмена.".to_string(),
                         Err(error) => format!("Буфер обмена: {error}"),
                     });
                 }
             }
-            Command::InsertNow => {
-                let text = shared().lock().unwrap().transcript.clone();
-                if !text.is_empty() {
+            Command::InsertText(text) => {
+                if !text.trim().is_empty() {
                     let target = insert::frontmost_pid().filter(|pid| Some(*pid) != current_pid());
                     set_status(match insert::insert(&text, target.or(target_pid)) {
                         Ok(()) => "Вставлено в активное поле.".to_string(),
@@ -132,7 +128,44 @@ fn controller(rx: mpsc::Receiver<Command>) {
             Command::SetInsertMode(value) => {
                 shared().lock().unwrap().insert_mode = value;
             }
+            Command::SetSound(value) => {
+                shared().lock().unwrap().sound = value;
+            }
         }
+    }
+}
+
+fn begin_recording(recorder: &mut Option<audio::Recorder>, target_pid: &mut Option<i32>) {
+    if shared().lock().unwrap().busy || recorder.is_some() {
+        return;
+    }
+    *target_pid = insert::frontmost_pid();
+    match audio::Recorder::start() {
+        Ok(rec) => {
+            *recorder = Some(rec);
+            shared().lock().unwrap().recording = true;
+            set_status("Идёт запись… отпустите, чтобы распознать.");
+            cue("start");
+        }
+        Err(error) => {
+            set_status(format!("Не удалось начать запись: {error}"));
+            cue("error");
+        }
+    }
+}
+
+fn stop_recording(recorder: &mut Option<audio::Recorder>, target_pid: Option<i32>) {
+    let Some(rec) = recorder.take() else { return };
+    shared().lock().unwrap().recording = false;
+    cue("stop");
+    match rec.stop() {
+        Ok(wav) => {
+            shared().lock().unwrap().busy = true;
+            set_status("Распознавание Parakeet…");
+            let insert_mode = shared().lock().unwrap().insert_mode;
+            std::thread::spawn(move || finish(wav, target_pid, insert_mode));
+        }
+        Err(error) => set_status(format!("Запись не удалась: {error}")),
     }
 }
 
@@ -142,8 +175,8 @@ fn current_pid() -> Option<i32> {
 
 fn finish(wav: Vec<u8>, target_pid: Option<i32>, insert_mode: bool) {
     let result = engine::transcribe(&wav);
-    let (transcript, status) = match result {
-        Ok(text) if text.is_empty() => (None, "Речь не распознана.".to_string()),
+    let (transcript, status, ok) = match result {
+        Ok(text) if text.is_empty() => (None, "Речь не распознана.".to_string(), false),
         Ok(text) => {
             let mut message = match insert::write_clipboard(&text) {
                 Ok(()) => "Скопировано в буфер обмена.".to_string(),
@@ -155,14 +188,17 @@ fn finish(wav: Vec<u8>, target_pid: Option<i32>, insert_mode: bool) {
                     Err(error) => message.push_str(&format!(" Вставка: {error}.")),
                 }
             }
-            (Some(text), message)
+            (Some(text), message, true)
         }
-        Err(error) => (None, format!("Ошибка распознавания: {error}")),
+        Err(error) => (None, format!("Ошибка распознавания: {error}"), false),
     };
-    let mut guard = shared().lock().unwrap();
-    guard.busy = false;
-    if let Some(text) = transcript {
-        guard.transcript = text;
+    {
+        let mut guard = shared().lock().unwrap();
+        guard.busy = false;
+        if let Some(text) = transcript {
+            guard.transcript = text;
+        }
+        guard.status = status;
     }
-    guard.status = status;
+    cue(if ok { "done" } else { "error" });
 }

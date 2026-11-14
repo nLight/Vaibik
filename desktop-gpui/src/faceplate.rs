@@ -1,8 +1,9 @@
+use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::{InteractiveElement, StatefulInteractiveElement};
 use gpui_kit::*;
 
 use crate::dictation::{self, Command, Snapshot};
-use crate::Universal;
+use crate::{audio, hid, Universal};
 
 const ALU_0: u32 = 0xf5f4f0;
 const ALU_2: u32 = 0xd9d8d2;
@@ -29,13 +30,10 @@ const MIC_PATH: &str = "M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3z M1
 const COPY_PATH: &str = "M9 9h10v10H9z M5 5h10v2H7v8H5z";
 const SPEAKER_PATH: &str = "M4 9v6h4l5 4V5L8 9H4z M16 8a4 4 0 0 1 0 8v-2a2 2 0 0 0 0-4V8z";
 const GEAR_PATH: &str = "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M11 2h2l.4 2.6 2.2.9 2.2-1.5 1.4 1.4-1.5 2.2.9 2.2L21 11v2l-2.6.4-.9 2.2 1.5 2.2-1.4 1.4-2.2-1.5-2.2.9L13 21h-2l-.4-2.6-2.2-.9-2.2 1.5-1.4-1.4 1.5-2.2-.9-2.2L3 13v-2l2.6-.4.9-2.2L5 6.2l1.4-1.4 2.2 1.5 2.2-.9L11 2z";
+const BACK_PATH: &str = "M15 6l-6 6 6 6V6z";
 
 fn grad(angle: f32, from: u32, to: u32) -> Background {
-    linear_gradient(
-        angle,
-        linear_color_stop(rgb(from), 0.0),
-        linear_color_stop(rgb(to), 1.0),
-    )
+    linear_gradient(angle, linear_color_stop(rgb(from), 0.0), linear_color_stop(rgb(to), 1.0))
 }
 
 fn icon(path: &str, size: f32, color: u32) -> impl IntoElement {
@@ -50,23 +48,35 @@ fn led(color: u32, size: f32) -> impl IntoElement {
     div().size(px(size)).rounded(px(size)).bg(rgb(color))
 }
 
-pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement {
-    let led_color = if snap.recording {
-        RED
-    } else if snap.busy {
-        AMBER
-    } else {
-        GREEN
-    };
-    let status = if snap.recording {
-        "ЗАПИСЬ"
-    } else if snap.busy {
-        "РАСПОЗНАВАНИЕ"
-    } else {
-        "ГОТОВ К ЗАПИСИ"
-    };
-    let has_text = !snap.transcript.trim().is_empty();
+pub fn render(snap: &Snapshot, window: &mut Window, this: &mut Universal, cx: &mut Context<Universal>) -> impl IntoElement {
+    if this.draft.is_none() {
+        let state = cx.new(|cx| {
+            TextareaState::new(window, cx).placeholder("Здесь появится текст диктовки…")
+        });
+        this.draft = Some(state);
+    }
+    if snap.transcript != this.last_transcript {
+        this.last_transcript = snap.transcript.clone();
+        if let Some(draft) = &this.draft {
+            let text = snap.transcript.clone();
+            draft.update(cx, |state, cx| state.set_value(text, window, cx));
+        }
+    }
 
+    let toolbar = toolbar(snap, this, cx);
+    let body = if this.settings { settings(snap, this, cx) } else { overview(snap, this, cx) };
+
+    div()
+        .flex()
+        .flex_col()
+        .size_full()
+        .bg(grad(180.0, ALU_0, ALU_2))
+        .text_color(rgb(INK))
+        .child(toolbar)
+        .child(body)
+}
+
+fn toolbar(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) -> impl IntoElement {
     let brand_mark = div()
         .size(px(22.0))
         .rounded(px(6.0))
@@ -103,7 +113,9 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
                 .child("VM-01"),
         );
 
+    let sound_dot = if snap.sound { GREEN } else { INK_FAINT };
     let sound_btn = div()
+        .id("sound")
         .size(px(34.0))
         .rounded(px(9.0))
         .bg(grad(180.0, ALU_0, ALU_2))
@@ -112,9 +124,22 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .flex()
         .items_center()
         .justify_center()
-        .child(icon(SPEAKER_PATH, 16.0, INK));
+        .cursor_pointer()
+        .on_click(cx.listener(|_, _, _, _| {
+            let current = dictation::snapshot().sound;
+            dictation::send(Command::SetSound(!current));
+        }))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(3.0))
+                .child(led(sound_dot, 5.0))
+                .child(icon(SPEAKER_PATH, 15.0, INK)),
+        );
 
     let gear_btn = div()
+        .id("settings")
         .size(px(34.0))
         .rounded(px(9.0))
         .bg(grad(180.0, ALU_0, ALU_2))
@@ -123,9 +148,16 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .flex()
         .items_center()
         .justify_center()
+        .cursor_pointer()
+        .on_click(cx.listener(|this, _, _, _| {
+            this.settings = !this.settings;
+            if this.settings {
+                this.mics = audio::input_names();
+            }
+        }))
         .child(icon(GEAR_PATH, 16.0, INK));
 
-    let toolbar = div()
+    let mut bar = div()
         .flex()
         .items_center()
         .h(px(58.0))
@@ -133,9 +165,47 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .gap(px(8.0))
         .child(brand)
         .child(div().flex_1())
-        .child(sound_btn)
-        .child(gear_btn);
+        .child(sound_btn);
 
+    if this.settings {
+        let back = div()
+            .id("back")
+            .h(px(34.0))
+            .rounded(px(9.0))
+            .px(px(12.0))
+            .bg(grad(180.0, ALU_0, ALU_2))
+            .border_1()
+            .border_color(rgb(ALU_EDGE))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, _| this.settings = false))
+            .child(icon(BACK_PATH, 14.0, INK))
+            .child(div().text_size(px(12.0)).text_color(rgb(INK)).child("Готово"));
+        bar = bar.child(back);
+    } else {
+        bar = bar.child(gear_btn);
+    }
+    bar
+}
+
+fn overview(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) -> Div {
+    let led_color = if snap.recording { RED } else if snap.busy { AMBER } else { GREEN };
+    let status = if snap.recording {
+        "ЗАПИСЬ"
+    } else if snap.busy {
+        "РАСПОЗНАВАНИЕ"
+    } else {
+        "ГОТОВ К ЗАПИСИ"
+    };
+    let has_text = !snap.transcript.trim().is_empty();
+
+    let (device_label, device_led) = match hid::device_name() {
+        Some(name) if name.contains("(USB)") => ("VibeMic · USB".to_string(), GREEN),
+        Some(_) => ("VibeMic · радио".to_string(), GREEN),
+        None => ("VibeMic не подключён".to_string(), OLED_FAINT),
+    };
     let device_pill = div()
         .flex()
         .items_center()
@@ -146,13 +216,13 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .bg(rgba(0xffffff0a))
         .border_1()
         .border_color(rgb(OLED_LINE))
-        .child(led(GREEN, 7.0))
+        .child(led(device_led, 7.0))
         .child(
             div()
                 .text_size(px(11.5))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgb(OLED_DIM))
-                .child("Parakeet · локально"),
+                .child(device_label),
         );
 
     let oled_status = div()
@@ -179,34 +249,22 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .text_color(rgb(OLED_FAINT))
         .child(snap.status.clone());
 
-    let draft_screen = if has_text {
-        div()
-            .flex_1()
-            .py(px(10.0))
-            .text_size(px(17.0))
-            .line_height(px(25.0))
-            .text_color(rgb(OLED_INK))
-            .child(snap.transcript.clone())
-    } else {
-        div()
-            .flex_1()
-            .flex()
-            .items_center()
-            .justify_center()
-            .py(px(10.0))
-            .child(
-                div()
-                    .text_size(px(12.5))
-                    .text_color(rgb(OLED_FAINT))
-                    .child("Здесь появится текст диктовки…"),
-            )
-    };
+    let draft = this.draft.as_ref().expect("draft initialized");
+    let draft_screen = div()
+        .flex_1()
+        .py(px(10.0))
+        .child(
+            Textarea::new(draft)
+                .w_full()
+                .h_full()
+                .appearance(false)
+                .bordered(false)
+                .text_size(px(17.0))
+                .line_height(px(26.0))
+                .text_color(rgb(OLED_INK)),
+        );
 
-    let ptt_bg = if snap.recording {
-        grad(145.0, 0xff6a5a, RED)
-    } else {
-        grad(145.0, SIGNAL_HOT, SIGNAL_DEEP)
-    };
+    let ptt_bg = if snap.recording { grad(145.0, 0xff6a5a, RED) } else { grad(145.0, SIGNAL_HOT, SIGNAL_DEEP) };
     let ptt = div()
         .id("ptt")
         .size(px(54.0))
@@ -221,12 +279,6 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .on_click(cx.listener(|_, _, _, _| dictation::send(Command::Toggle)))
         .child(icon(MIC_PATH, 23.0, 0xffffff));
 
-    let seg_insert = seg_button("seg-insert", "Вставка", snap.insert_mode, cx.listener(|_, _, _, _| {
-        dictation::send(Command::SetInsertMode(true))
-    }));
-    let seg_buffer = seg_button("seg-buffer", "Буфер", !snap.insert_mode, cx.listener(|_, _, _, _| {
-        dictation::send(Command::SetInsertMode(false))
-    }));
     let segmented = div()
         .flex()
         .items_center()
@@ -236,8 +288,12 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .border_color(rgb(OLED_LINE))
         .rounded(px(10.0))
         .p(px(3.0))
-        .child(seg_insert)
-        .child(seg_buffer);
+        .child(seg_button("seg-insert", "Вставка", snap.insert_mode, cx.listener(|_, _, _, _| {
+            dictation::send(Command::SetInsertMode(true))
+        })))
+        .child(seg_button("seg-buffer", "Буфер", !snap.insert_mode, cx.listener(|_, _, _, _| {
+            dictation::send(Command::SetInsertMode(false))
+        })));
 
     let copy_btn = div()
         .id("copy")
@@ -253,7 +309,10 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .text_size(px(12.0))
         .text_color(rgb(if has_text { OLED_DIM } else { OLED_FAINT }))
         .cursor_pointer()
-        .on_click(cx.listener(|_, _, _, _| dictation::send(Command::Copy)))
+        .on_click(cx.listener(|this, _, _, cx| {
+            let text = this.draft_text(cx);
+            dictation::send(Command::CopyText(text));
+        }))
         .child(icon(COPY_PATH, 13.0, if has_text { OLED_DIM } else { OLED_FAINT }))
         .child("Копировать");
 
@@ -287,7 +346,10 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
             .font_weight(FontWeight::BOLD)
             .text_color(rgb(0xffffff))
             .cursor_pointer()
-            .on_click(cx.listener(|_, _, _, _| dictation::send(Command::InsertNow)))
+            .on_click(cx.listener(|this, _, _, cx| {
+                let text = this.draft_text(cx);
+                dictation::send(Command::InsertText(text));
+            }))
             .child("Вставить");
         controls = controls.child(insert_btn);
     }
@@ -309,23 +371,164 @@ pub fn render(snap: &Snapshot, cx: &mut Context<Universal>) -> impl IntoElement 
         .child(draft_screen)
         .child(controls);
 
-    let board = div()
+    div()
         .flex()
         .flex_col()
         .flex_1()
         .pt(px(2.0))
         .px(px(20.0))
         .pb(px(18.0))
-        .child(oled);
+        .child(oled)
+}
 
+fn settings(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) -> Div {
+    let mut mic_buttons = div()
+        .id("mic-scroll")
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .max_h(px(190.0))
+        .overflow_y_scroll()
+        .child(mic_option(
+        "mic-auto",
+        "VibeMic автоматически (донгл)",
+        this.mic_choice.is_none(),
+        cx.listener(|this, _, _, _| {
+            this.mic_choice = None;
+            audio::set_preferred(None);
+        }),
+    ));
+    for (index, name) in this.mics.clone().into_iter().enumerate() {
+        let selected = this.mic_choice.as_deref() == Some(name.as_str());
+        let label = name.clone();
+        mic_buttons = mic_buttons.child(mic_option(
+            format!("mic-{index}"),
+            &label,
+            selected,
+            cx.listener(move |this, _, _, _| {
+                this.mic_choice = Some(name.clone());
+                audio::set_preferred(Some(name.clone()));
+            }),
+        ));
+    }
+
+    let mic_card = card("Микрофон", "Источник записи для диктовки.", mic_buttons);
+
+    let insert_card = card(
+        "Место вставки",
+        "Куда попадает текст.",
+        div()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .bg(rgb(OLED_2))
+            .border_1()
+            .border_color(rgb(OLED_LINE))
+            .rounded(px(10.0))
+            .p(px(3.0))
+            .child(seg_button("set-insert", "Вставка", snap.insert_mode, cx.listener(|_, _, _, _| {
+                dictation::send(Command::SetInsertMode(true))
+            })))
+            .child(seg_button("set-buffer", "Буфер", !snap.insert_mode, cx.listener(|_, _, _, _| {
+                dictation::send(Command::SetInsertMode(false))
+            }))),
+    );
+
+    let sound_card = card(
+        "Звук",
+        "Сигналы записи.",
+        div()
+            .id("sound-row")
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(9.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .bg(rgb(OLED_2))
+            .border_1()
+            .border_color(rgb(OLED_LINE))
+            .cursor_pointer()
+            .on_click(cx.listener(|_, _, _, _| {
+                let current = dictation::snapshot().sound;
+                dictation::send(Command::SetSound(!current));
+            }))
+            .child(led(if snap.sound { GREEN } else { OLED_FAINT }, 8.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(rgb(OLED_INK))
+                    .child(if snap.sound { "Звук включён" } else { "Звук выключен" }),
+            ),
+    );
+
+    let model_card = card(
+        "Модель Parakeet",
+        "Локальное распознавание речи.",
+        div()
+            .text_size(px(12.0))
+            .text_color(rgb(if crate::engine::model_installed() { GREEN } else { AMBER }))
+            .child(if crate::engine::model_installed() { "Модель установлена." } else { "Модель не установлена." }),
+    );
+
+    div().flex().flex_col().flex_1().child(
+        div()
+            .flex()
+            .flex_col()
+            .h_full()
+            .gap(px(12.0))
+            .px(px(20.0))
+            .pb(px(18.0))
+            .pt(px(2.0))
+            .child(mic_card)
+            .child(
+                div()
+                    .flex()
+                    .gap(px(12.0))
+                    .child(div().flex_1().child(insert_card))
+                    .child(div().flex_1().child(sound_card))
+                    .child(div().flex_1().child(model_card)),
+            ),
+    )
+}
+
+fn card(title: &str, subtitle: &str, body: impl IntoElement) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
-        .size_full()
-        .bg(grad(180.0, ALU_0, ALU_2))
-        .text_color(rgb(INK))
-        .child(toolbar)
-        .child(board)
+        .gap(px(10.0))
+        .rounded(px(12.0))
+        .bg(rgb(OLED_1))
+        .border_1()
+        .border_color(rgb(OLED_LINE))
+        .p(px(14.0))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(div().text_size(px(13.0)).font_weight(FontWeight::BOLD).text_color(rgb(OLED_INK)).child(title.to_string()))
+                .child(div().text_size(px(11.0)).text_color(rgb(OLED_FAINT)).child(subtitle.to_string())),
+        )
+        .child(body)
+}
+
+fn mic_option(id: impl Into<ElementId>, label: &str, selected: bool, on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .rounded(px(9.0))
+        .px(px(12.0))
+        .py(px(8.0))
+        .bg(rgb(if selected { OLED_2 } else { OLED_1 }))
+        .border_1()
+        .border_color(rgb(if selected { SIGNAL_DEEP } else { OLED_LINE }))
+        .cursor_pointer()
+        .on_click(on_click)
+        .child(led(if selected { SIGNAL_HOT } else { OLED_FAINT }, 7.0))
+        .child(div().text_size(px(12.0)).text_color(rgb(OLED_INK)).child(label.to_string()))
 }
 
 fn seg_button(
@@ -344,9 +547,7 @@ fn seg_button(
         .on_click(on_click)
         .child(label);
     if pressed {
-        button = button
-            .bg(grad(180.0, 0x2b313b, 0x20252d))
-            .text_color(rgb(OLED_INK));
+        button = button.bg(grad(180.0, 0x2b313b, 0x20252d)).text_color(rgb(OLED_INK));
     } else {
         button = button.text_color(rgb(OLED_DIM));
     }
