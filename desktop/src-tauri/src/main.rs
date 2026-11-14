@@ -96,16 +96,24 @@ fn main() {
             if !fixture && cfg!(not(target_os = "linux")) {
                 let _ = tray::create(&handle, &lang);
             }
+            if let Some(window) = app.get_webview_window("main") {
+                macos::align_traffic_lights(&window.as_ref().window());
+            }
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Resized(_)
+            | tauri::WindowEvent::Moved(_)
+            | tauri::WindowEvent::Focused(_)
+            | tauri::WindowEvent::ScaleFactorChanged { .. } => macos::align_traffic_lights(window),
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 let state = window.app_handle().state::<Arc<AppState>>();
                 if !state.fixture && cfg!(not(target_os = "linux")) {
                     api.prevent_close();
                     let _ = window.hide();
                 }
             }
+            _ => {}
         })
         .build(context)
         .expect("failed to build VibeMic")

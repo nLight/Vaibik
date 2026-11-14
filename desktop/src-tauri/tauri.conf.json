@@ -20,7 +20,7 @@
         "minHeight": 540,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 16, "y": 32.5 },
+        "trafficLightPosition": { "x": 16, "y": 42 },
         "backgroundColor": "#e4e3de",
         "visible": false,
         "dragDropEnabled": false
