@@ -1,14 +1,13 @@
 mod audio;
 mod dictation;
 mod engine;
+mod faceplate;
 mod hotkey;
 mod insert;
 
 use std::time::Duration;
 
 use gpui_kit::*;
-use gpui_kit::base::{Disableable, StyledExt};
-use gpui_kit::component::button::Button;
 
 actions!(vibemic, [Quit]);
 
@@ -17,58 +16,7 @@ struct Universal;
 impl Render for Universal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let snap = dictation::snapshot();
-        let record_label = if snap.recording { "Стоп" } else { "Запись" };
-        let transcript = if snap.transcript.is_empty() { "—".to_string() } else { snap.transcript.clone() };
-        let mode_label = if snap.insert_mode { "Вставка: вкл" } else { "Вставка: выкл" };
-        let insert_mode = snap.insert_mode;
-
-        div()
-            .v_flex()
-            .gap_3()
-            .p_4()
-            .size_full()
-            .child(div().text_xl().child("VibeMic Universal"))
-            .child(div().text_sm().child(snap.status))
-            .child(
-                div()
-                    .h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("record")
-                            .label(record_label)
-                            .disabled(snap.busy)
-                            .on_click(cx.listener(|_, _, _, _| dictation::send(dictation::Command::Toggle))),
-                    )
-                    .child(
-                        Button::new("copy")
-                            .label("Копировать")
-                            .disabled(snap.transcript.is_empty())
-                            .on_click(cx.listener(|_, _, _, _| dictation::send(dictation::Command::Copy))),
-                    )
-                    .child(
-                        Button::new("insert")
-                            .label("Вставить")
-                            .disabled(snap.transcript.is_empty())
-                            .on_click(cx.listener(|_, _, _, _| dictation::send(dictation::Command::InsertNow))),
-                    )
-                    .child(
-                        Button::new("mode")
-                            .label(mode_label)
-                            .on_click(cx.listener(move |_, _, _, _| {
-                                dictation::send(dictation::Command::SetInsertMode(!insert_mode))
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .v_flex()
-                    .gap_1()
-                    .p_3()
-                    .min_h_24()
-                    .child(div().text_sm().child("Расшифровка"))
-                    .child(div().child(transcript)),
-            )
-            .child(div().text_xs().child("Горячая клавиша: F13 (запись/стоп). Текст копируется в буфер и вставляется в активное поле."))
+        faceplate::render(&snap, cx)
     }
 }
 
@@ -94,7 +42,7 @@ fn main() {
                 size: size(px(560.0), px(470.0)),
             })),
             titlebar: Some(TitlebarOptions {
-                title: Some("VibeMic Universal".into()),
+                title: Some("VibeMic".into()),
                 ..Default::default()
             }),
             ..Default::default()
