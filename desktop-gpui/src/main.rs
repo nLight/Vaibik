@@ -57,6 +57,9 @@ fn main() {
         dictation::start();
         hotkey::install();
         hid::spawn();
+        std::thread::spawn(|| {
+            let _ = engine::ensure_server();
+        });
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: point(px(140.0), px(140.0)),
