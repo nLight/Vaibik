@@ -598,6 +598,13 @@ async function refreshMics(request = false) {
     const devices = state.fixture ? reviewInputs : await microphones(request);
     if (version !== microphoneRefresh) return;
     state.inputs = devices;
+    const stored = state.settings.microphone;
+    if (!state.fixture && stored && !devices.some(device => device.deviceId === stored)) {
+        // deviceId hashes are re-salted when the webview origin changes between builds;
+        // adopt the present VibeMic input instead of leaving a stale "unavailable" selection.
+        const heal = pttInputs(devices, state.pttTransport)[0];
+        if (heal) await save({ microphone: heal.deviceId });
+    }
     updateMicrophones();
     const input = selectedInput();
     if (!state.fixture) setStandby(state.settings.dictationMode !== 'auto' && state.hid && input && isVibeMicInput(input) ? input.deviceId : undefined);
@@ -901,31 +908,41 @@ function begin(trigger) {
 
 async function captureTake(take, selected, input) {
     if (take.automatic) {
-        const route = await api.beginNativeDictation();
+        let route;
+        try { route = await api.beginNativeDictation(); }
+        catch { route = { native: false }; }
         if (route.native) {
             let stopShortcut;
             let localFallback = false;
             try {
                 if (route.shortcut === 'codex') {
                     if (state.recording === take) stopShortcut = await ptt?.holdShortcut('codex');
-                    if (!stopShortcut) throw new Error(t('Нажмите и удерживайте PTT.'));
+                    // Without the HID shortcut the target never opens its mic; capture
+                    // locally so the system stream still runs and text is inserted.
+                    if (!stopShortcut) localFallback = true;
                 } else if (route.shortcut === 'claude' && state.recording === take) {
                     stopShortcut = await ptt?.holdShortcut('claude', route.usage).catch(() => null);
-                    if (stopShortcut) await new Promise(resolve => setTimeout(resolve, 350));
-                    if (state.recording === take && await api.checkClaudeDictation(route.session, false)) {
-                        await new Promise(resolve => setTimeout(resolve, 600));
-                        if (state.recording === take && await api.checkClaudeDictation(route.session, true)) {
-                            await stopShortcut?.();
-                            localFallback = true;
+                    if (!stopShortcut) {
+                        await api.cancelNativeDictation().catch(() => {});
+                        localFallback = true;
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, 350));
+                        if (state.recording === take && await api.checkClaudeDictation(route.session, false)) {
+                            await new Promise(resolve => setTimeout(resolve, 600));
+                            if (state.recording === take && await api.checkClaudeDictation(route.session, true)) {
+                                await stopShortcut?.();
+                                localFallback = true;
+                            }
                         }
                     }
                 }
             } catch (error) {
-                if (route.shortcut === 'claude') {
-                    await stopShortcut?.().catch(() => {});
-                    await api.cancelNativeDictation().catch(() => {});
-                }
-                throw error;
+                if (route.shortcut !== 'claude') throw error;
+                // The HID shortcut or the idle check failed; capture locally so the
+                // system mic still opens and the draft is inserted instead of erroring out.
+                await stopShortcut?.().catch(() => {});
+                await api.cancelNativeDictation().catch(() => {});
+                localFallback = true;
             }
             if (!localFallback) {
                 clearTimeout(take.timeout);
@@ -959,7 +976,8 @@ async function captureTake(take, selected, input) {
         },
         cancel: async () => {}
     };
-    return input ? input.begin() : startCapture(selected, { transport: state.pttTransport });
+    const usable = selectedInput() ? selected : pttInputs(state.inputs, state.pttTransport)[0]?.deviceId;
+    return input ? input.begin() : startCapture(usable, { transport: state.pttTransport });
 }
 
 async function release(trigger, cancel = false) {

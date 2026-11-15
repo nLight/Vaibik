@@ -86,7 +86,7 @@ fn pick(api: &HidApi) -> Option<Vec<u8>> {
 }
 
 fn run(app: AppHandle, rx: Receiver<HidCommand>) {
-    let Ok(api) = HidApi::new() else { return };
+    let Ok(mut api) = HidApi::new() else { return };
     let mut current: Option<HidDevice> = None;
     let mut current_path: Vec<u8> = Vec::new();
     let mut current_name = String::new();
@@ -97,7 +97,14 @@ fn run(app: AppHandle, rx: Receiver<HidCommand>) {
     loop {
         loop {
             match rx.try_recv() {
-                Ok(HidCommand::Rescan) => last_scan = Instant::now() - Duration::from_secs(5),
+                Ok(HidCommand::Rescan) => {
+                    last_scan = Instant::now() - Duration::from_secs(5);
+                    // The initial connection event can fire before the webview has
+                    // registered its listener; re-emit so a scan always syncs state.
+                    if current.is_some() {
+                        emit_connection(&app, true, &current_name);
+                    }
+                }
                 Ok(HidCommand::Feature(bytes)) => {
                     if let Some(device) = &current {
                         let mut report = vec![0u8];
@@ -114,6 +121,9 @@ fn run(app: AppHandle, rx: Receiver<HidCommand>) {
 
         if current.is_none() && last_scan.elapsed() >= Duration::from_secs(1) {
             last_scan = Instant::now();
+            // device_list() is a snapshot; without a refresh a dongle plugged in
+            // after launch (the app lives in the tray) is never enumerated.
+            let _ = api.refresh_devices();
             if let Some(path) = pick(&api) {
                 let cpath = std::ffi::CString::new(path.clone()).unwrap_or_default();
                 if let Ok(device) = api.open_path(&cpath) {
@@ -133,6 +143,7 @@ fn run(app: AppHandle, rx: Receiver<HidCommand>) {
         if let Some(device) = &current {
             if last_verify.elapsed() >= Duration::from_secs(1) {
                 last_verify = Instant::now();
+                let _ = api.refresh_devices();
                 let present = api.device_list().any(|info| info.path().to_bytes() == current_path);
                 if !present {
                     current = None;

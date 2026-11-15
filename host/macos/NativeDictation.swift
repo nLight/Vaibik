@@ -20,7 +20,9 @@ private func claudeShortcutUsage() -> Int? {
             &deadKey, characters.count, &count, &characters)
         if status == noErr && count == 1 && (characters[0] == 0x64 || characters[0] == 0x44) { return usage }
     }
-    return nil
+    // Non-Latin layouts (e.g. Russian) never translate Cmd+D to "d"; fall back to the
+    // physical D position so the HID tap is still emitted instead of silently sending nothing.
+    return 0x07
 }
 
 private struct NativeRecording {
@@ -33,6 +35,7 @@ private struct NativeRecording {
     let composer: AXUIElement
     let started: TimeInterval
     let usesClaudeShortcut: Bool
+    let isClaude: Bool
 
     static let startLabels: Set<String> = ["Dictate", "Start dictation", "Диктовать", "Начать диктовку"]
     static let claudeStartLabels = startLabels.union(["Press and hold to record", "Turn on microphone"])
@@ -47,30 +50,43 @@ private struct NativeRecording {
     }
 
     static func begin(id: Int, claudeShortcut: Bool) -> NativeRecording? {
-        guard AXIsProcessTrusted(), let application = NSWorkspace.shared.frontmostApplication,
+        guard let application = NSWorkspace.shared.frontmostApplication,
               ApprovalTarget.supports(application), let bundle = application.bundleIdentifier else { return nil }
         let element = AXUIElementCreateApplication(application.processIdentifier)
         AXUIElementSetMessagingTimeout(element, 0.1)
-        guard let window = axElement(element, kAXFocusedWindowAttribute),
+        let isClaude = bundle == claudeBundle
+        // The Claude HID tap needs no Accessibility to START (parity with the Codex hold):
+        // the firmware emits Cmd+D and Claude itself decides whether a composer is focused.
+        // Stop/idle re-locate the button via AX, which does need the grant.
+        if isClaude && claudeShortcut {
+            let window = axElement(element, kAXFocusedWindowAttribute) ?? element
+            let field = axElement(element, kAXFocusedUIElementAttribute) ?? element
+            return NativeRecording(id: id, app: application.localizedName ?? "Claude",
+                pid: application.processIdentifier, window: window,
+                title: attribute(window, kAXTitleAttribute) as? String, field: field, composer: field,
+                started: ProcessInfo.processInfo.systemUptime, usesClaudeShortcut: true, isClaude: true)
+        }
+        guard AXIsProcessTrusted(),
+              let window = axElement(element, kAXFocusedWindowAttribute),
               let field = axElement(element, kAXFocusedUIElementAttribute),
               attribute(field, kAXSelectedTextRangeAttribute) != nil,
               attribute(field, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole,
               ApprovalTarget.documentContaining(field, in: window, bundle: bundle) != nil else { return nil }
         var composer = field
-        let useShortcut = claudeShortcut && bundle == claudeBundle
-        let labels = useShortcut ? claudeStartLabels : startLabels
+        if isClaude && !claudeShortcut { return nil }
+        let useShortcut = isClaude
+        let labels = isClaude ? claudeStartLabels : startLabels
         for _ in 0..<7 {
             if CFEqual(composer, window) || attribute(composer, kAXRoleAttribute) as? String == "AXWebArea" {
                 break
             }
             if let button = button(in: composer, labels: labels) {
                 guard NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier else { return nil }
-                guard useShortcut || AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
-                else { return nil }
+                guard useShortcut || AXUIElementPerformAction(button, kAXPressAction as CFString) == .success else { return nil }
                 return NativeRecording(id: id, app: application.localizedName ?? "Codex",
                     pid: application.processIdentifier, window: window,
                     title: attribute(window, kAXTitleAttribute) as? String, field: field, composer: composer,
-                    started: ProcessInfo.processInfo.systemUptime, usesClaudeShortcut: useShortcut)
+                    started: ProcessInfo.processInfo.systemUptime, usesClaudeShortcut: useShortcut, isClaude: isClaude)
             }
             guard let parent = axElement(composer, kAXParentAttribute) else { break }
             composer = parent
@@ -78,14 +94,27 @@ private struct NativeRecording {
         return nil
     }
 
-    // An acknowledged USB report does not mean Claude received its shortcut.
-    // Only retry or hand off to local dictation if the original recorder is still idle.
+    // Electron recreates the composer's AX nodes, so a stored element goes stale.
+    // Re-locate from the current focused field, walking up a few ancestors.
+    func locateButton(_ labels: Set<String>) -> AXUIElement? {
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.1)
+        guard var composer = axElement(application, kAXFocusedUIElementAttribute) else { return nil }
+        for _ in 0..<7 {
+            if CFEqual(composer, window) || attribute(composer, kAXRoleAttribute) as? String == "AXWebArea" {
+                break
+            }
+            if let button = Self.button(in: composer, labels: labels) { return button }
+            guard let parent = axElement(composer, kAXParentAttribute) else { break }
+            composer = parent
+        }
+        return nil
+    }
+
     func idleClaudeButton() -> AXUIElement? {
-        guard usesClaudeShortcut, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+        guard isClaude, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
               attribute(window, kAXTitleAttribute) as? String == title,
-              let focused = axElement(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute),
-              CFEqual(focused, field),
-              let button = Self.button(in: composer, labels: Self.claudeStartLabels),
+              let button = locateButton(Self.claudeStartLabels),
               attribute(button, "AXBusy") as? Bool != true,
               attribute(button, kAXValueAttribute) as? NSNumber != 1 else { return nil }
         return button
@@ -93,14 +122,16 @@ private struct NativeRecording {
 
     func stop(cancel: Bool) -> Bool {
         guard attribute(window, kAXTitleAttribute) as? String == title else { return false }
-        if cancel, let button = Self.button(in: composer, labels: Self.cancelLabels) {
+        if cancel, let button = Self.button(in: composer, labels: Self.cancelLabels) ?? locateButton(Self.cancelLabels) {
             return AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
         }
-        if let button = Self.button(in: composer, labels: Self.stopLabels.union(Self.cancelLabels)) {
+        let stopSet = Self.stopLabels.union(Self.cancelLabels)
+        if let button = Self.button(in: composer, labels: stopSet) ?? locateButton(stopSet) {
             return AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
         }
+        let idleSet = isClaude ? Self.claudeStartLabels : Self.startLabels
         return ProcessInfo.processInfo.systemUptime - started > 0.12 &&
-            Self.button(in: composer, labels: usesClaudeShortcut ? Self.claudeStartLabels : Self.startLabels) != nil
+            (Self.button(in: composer, labels: idleSet) ?? locateButton(idleSet)) != nil
     }
 }
 
