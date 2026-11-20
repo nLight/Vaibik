@@ -69,7 +69,10 @@ trap cleanup EXIT
 verify_signer() {
   if ! "$signed"; then return; fi
   local prefix="$stage/signing-certificate-"
+  # Never compare against a certificate left over from the previous binary.
+  rm -f -- "$prefix"*
   /usr/bin/codesign -d --extract-certificates="$prefix" "$1"
+  [[ -s "${prefix}0" ]] || fail "No Developer ID certificate in $1."
   local actual
   actual=$(shasum -a 1 "${prefix}0" | awk '{print toupper($1)}')
   [[ "$actual" == "$identity" ]] || fail "Unexpected signing identity in $1."
@@ -106,6 +109,15 @@ for arch in "${architectures[@]}"; do
   rustup target add "$target" >/dev/null
   env -u VIBEMIC_NEMO_RUNTIME -u VIBEMIC_DRAFT_HELPER -u VIBEMIC_RESOURCES \
     VIBEMIC_MAC_ARCH="$arch" node script/prepare_desktop.mjs
+  if "$signed"; then
+    # Tauri copies these resources unchanged, so give every Mach-O in the engine a
+    # Developer ID signature with the hardened runtime and a timestamp for notarization.
+    while IFS= read -r -d '' file; do
+      if file -b "$file" | grep -q 'Mach-O'; then
+        /usr/bin/codesign --force --sign "$identity" --options runtime --timestamp "$file"
+      fi
+    done < <(find build/desktop-resources/engine -type f -print0)
+  fi
   if "$signed"; then
     export APPLE_SIGNING_IDENTITY="$identity"
   else
