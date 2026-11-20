@@ -49,7 +49,7 @@ A tap lasts 25–125 ms after debouncing, with up to 350 ms between the first re
 
 RX starts playback after at least **45 ms** from HID transfer completion, **20 ms** after USB audio opens and **30 ms** of buffered audio (a completed short session can use UP). Its storage window retains up to **2.56 seconds** while the host prepares input. Missing sample slots become silence. Radio callbacks wake a worker; USB SOF takes a ready 1 ms block without waiting for radio. Occasional one-sample insertion/removal compensates clock drift without changing USB frame size.
 
-After the final PCM, RX waits **35 ms** before releasing HID. The time from the physical button release includes pre-roll and buffered playback. While PTT is held, delayed or interrupted USB audio pauses playback and retains the most recent PCM when the buffer fills. The HID shortcut stays down until PTT release or **250 ms** without radio audio packets. A single pending next session can preserve the beginning of a rapid second press.
+After the final PCM, RX waits **35 ms** before releasing HID. The time from the physical button release includes pre-roll and buffered playback. While PTT is held, delayed or interrupted USB audio pauses playback and retains the most recent PCM when the buffer fills. PTT release, or **250 ms** without radio audio packets, ends the input; RX then plays out the PCM it already holds. The PTT state and HID shortcut stay down until that playback finishes. If no host has opened USB audio by release, RX keeps them down until audio opens or **2 s** after the press began, so a dictation app that opens its microphone slowly still receives a short phrase. A single pending next session can preserve the beginning of a rapid second press.
 
 ## Host interfaces
 
