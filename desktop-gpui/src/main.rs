@@ -5,6 +5,7 @@ mod faceplate;
 mod hid;
 mod hotkey;
 mod insert;
+mod native;
 mod sound;
 
 use std::time::Duration;
@@ -63,7 +64,7 @@ fn main() {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: point(px(140.0), px(140.0)),
-                size: size(px(560.0), px(470.0)),
+                size: size(px(560.0), px(600.0)),
             })),
             titlebar: Some(TitlebarOptions {
                 title: Some("VibeMic".into()),
