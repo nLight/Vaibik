@@ -28,11 +28,19 @@ pub fn model_file() -> PathBuf {
     model_directory().join(MODEL_FILE)
 }
 
-// The nemo-speech runtime ships inside the installed VibeMic bundle; fall back to
-// the staged build tree so a dev run works without installing.
+// Engine resources inside this app's own bundle (VibeMic Console.app/Contents/Resources).
+fn bundled_engine() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let contents = executable.parent()?.parent()?;
+    Some(contents.join("Resources/vibemic/engine"))
+}
+
+// The nemo-speech runtime ships inside this app's bundle or the installed VibeMic bundle;
+// fall back to the staged build tree so a dev run works without installing.
 pub fn runtime() -> Result<PathBuf, String> {
     let tool = if cfg!(windows) { "nemo-speech.exe" } else { "nemo-speech" };
     let candidates = [
+        bundled_engine().map(|engine| engine.join("nemo/bin").join(tool)).unwrap_or_default(),
         PathBuf::from("/Applications/VibeMic.app/Contents/Resources/vibemic/engine/nemo/bin").join(tool),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../build/desktop-resources/engine/nemo/bin")
@@ -49,6 +57,7 @@ pub fn runtime() -> Result<PathBuf, String> {
 pub fn helper() -> Option<PathBuf> {
     let tool = if cfg!(windows) { "vibemic-desktop-draft.exe" } else { "vibemic-desktop-draft" };
     let candidates = [
+        bundled_engine().map(|engine| engine.join(tool)).unwrap_or_default(),
         PathBuf::from("/Applications/VibeMic.app/Contents/Resources/vibemic/engine").join(tool),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../build/desktop-resources/engine").join(tool),
     ];

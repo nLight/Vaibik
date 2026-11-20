@@ -170,7 +170,7 @@ jobs:
           ./script/package_macos.sh "${flags[@]}" "$BUILD_ARCH"
           version=$(node -p 'require("./desktop/package.json").version')
           mkdir -p build/ci/macos
-          cp "$output/VibeMic-$version-$BUILD_ARCH.dmg" build/ci/macos/
+          cp "$output/VibeMic-$version-$BUILD_ARCH.dmg" "$output/VibeMic-Console-$version-$BUILD_ARCH.dmg" build/ci/macos/
           printf '%s\n' "$signature" > "build/ci/macos/signing-$BUILD_ARCH.txt"
           printf '%s\n' "$notarization" > "build/ci/macos/notarization-$BUILD_ARCH.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -222,13 +222,16 @@ jobs:
           done
           test -s "release/VibeMic-$version-arm64.dmg"
           test -s "release/VibeMic-$version-x64.dmg"
+          test -s "release/VibeMic-Console-$version-arm64.dmg"
+          test -s "release/VibeMic-Console-$version-x64.dmg"
           grep -qx 'Developer ID' release/signing-arm64.txt
           grep -qx 'Developer ID' release/signing-x64.txt
           grep -qx 'Accepted' release/notarization-arm64.txt
           grep -qx 'Accepted' release/notarization-x64.txt
           cat > release/notes.md <<EOF
           $marker
-          - macOS 13.3+: arm64 for Apple Silicon and x64 for Intel. Both DMGs are signed with Developer ID and notarized by Apple.
+          - macOS 13.3+: arm64 for Apple Silicon and x64 for Intel. All DMGs are signed with Developer ID and notarized by Apple.
+          - VibeMic Console (\`VibeMic-Console-*.dmg\`) is the new native console: the transmitter button starts Codex and Claude dictation and records with Parakeet everywhere else.
           - Match S140 v6 or v7 to the SoftDevice version in \`INFO_UF2.TXT\`. Use the battery-enabled image on a confirmed nice!nano v2.
           EOF
           if [[ -z "$previous" ]]; then
