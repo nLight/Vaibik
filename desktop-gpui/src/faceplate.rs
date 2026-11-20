@@ -48,6 +48,59 @@ fn led(color: u32, size: f32) -> impl IntoElement {
     div().size(px(size)).rounded(px(size)).bg(rgb(color))
 }
 
+// Transmitter battery: a small cell glyph plus "≈ 82 %", "USB" or "—" without fresh data.
+fn battery_pill(battery: Option<hid::Battery>) -> impl IntoElement {
+    let percent = battery.and_then(|battery| battery.percent);
+    let usb = battery.map(|battery| battery.usb_power).unwrap_or(false);
+    let (label, fill, color) = match (usb, percent) {
+        (true, _) => ("USB".to_string(), 100.0, GREEN),
+        (false, Some(percent)) => (
+            format!("≈ {percent}%"),
+            f32::from(percent),
+            if percent <= 15 { RED } else if percent <= 30 { AMBER } else { OLED_INK },
+        ),
+        (false, None) => ("—".to_string(), 0.0, OLED_FAINT),
+    };
+    let cell = div()
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .w(px(20.0))
+                .h(px(10.0))
+                .p(px(1.5))
+                .rounded(px(2.5))
+                .border_1()
+                .border_color(rgb(OLED_DIM))
+                .child(div().h_full().w(relative(fill / 100.0)).rounded(px(1.0)).bg(rgb(color))),
+        )
+        .child(div().w(px(2.0)).h(px(4.0)).rounded_r(px(1.0)).bg(rgb(OLED_DIM)));
+    div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .rounded(px(999.0))
+        .px(px(11.0))
+        .py(px(5.0))
+        .bg(rgba(0xffffff0a))
+        .border_1()
+        .border_color(rgb(OLED_LINE))
+        .child(cell)
+        .child(
+            div()
+                .text_size(px(11.5))
+                .font_weight(FontWeight::BOLD)
+                .whitespace_nowrap()
+                .text_color(rgb(match percent {
+                    Some(percent) if !usb && percent <= 15 => RED,
+                    Some(_) => OLED_DIM,
+                    None if usb => OLED_DIM,
+                    None => OLED_FAINT,
+                }))
+                .child(label),
+        )
+}
+
 pub fn render(snap: &Snapshot, window: &mut Window, this: &mut Universal, cx: &mut Context<Universal>) -> impl IntoElement {
     if this.draft.is_none() {
         let state = cx.new(|cx| {
@@ -225,6 +278,8 @@ fn overview(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) 
                 .child(device_label),
         );
 
+    let battery = hid::device_name().map(|_| battery_pill(hid::battery()));
+
     let oled_status = div()
         .flex()
         .items_center()
@@ -241,6 +296,7 @@ fn overview(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) 
                 .child(status),
         )
         .child(div().flex_1())
+        .children(battery)
         .child(device_pill);
 
     let hint = div()
@@ -387,7 +443,7 @@ fn settings(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) 
         .flex()
         .flex_col()
         .gap(px(6.0))
-        .max_h(px(190.0))
+        .max_h(px(160.0))
         .overflow_y_scroll()
         .child(mic_option(
         "mic-auto",
@@ -462,13 +518,54 @@ fn settings(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) 
             ),
     );
 
+    let native_card = card(
+        "Codex и Claude",
+        "Диктовка по кнопке передатчика.",
+        div()
+            .id("native-row")
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(9.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .bg(rgb(OLED_2))
+            .border_1()
+            .border_color(rgb(OLED_LINE))
+            .cursor_pointer()
+            .on_click(cx.listener(|_, _, _, _| {
+                let current = dictation::snapshot().native;
+                dictation::send(Command::SetNative(!current));
+            }))
+            .child(led(if snap.native { GREEN } else { OLED_FAINT }, 8.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(rgb(OLED_INK))
+                    .child(if snap.native { "Их встроенная диктовка" } else { "Запись VibeMic" }),
+            ),
+    );
+
     let model_card = card(
         "Модель Parakeet",
         "Локальное распознавание речи.",
         div()
-            .text_size(px(12.0))
-            .text_color(rgb(if crate::engine::model_installed() { GREEN } else { AMBER }))
-            .child(if crate::engine::model_installed() { "Модель установлена." } else { "Модель не установлена." }),
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(9.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .bg(rgb(OLED_2))
+            .border_1()
+            .border_color(rgb(OLED_LINE))
+            .child(led(if crate::engine::model_installed() { GREEN } else { AMBER }, 8.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(rgb(OLED_INK))
+                    .child(if crate::engine::model_installed() { "Модель установлена" } else { "Модель не установлена" }),
+            ),
     );
 
     div().flex().flex_col().flex_1().child(
@@ -485,9 +582,15 @@ fn settings(snap: &Snapshot, this: &mut Universal, cx: &mut Context<Universal>) 
                 div()
                     .flex()
                     .gap(px(12.0))
-                    .child(div().flex_1().child(insert_card))
-                    .child(div().flex_1().child(sound_card))
-                    .child(div().flex_1().child(model_card)),
+                    .child(div().flex_1().min_w(px(0.0)).child(insert_card))
+                    .child(div().flex_1().min_w(px(0.0)).child(sound_card)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(12.0))
+                    .child(div().flex_1().min_w(px(0.0)).child(native_card))
+                    .child(div().flex_1().min_w(px(0.0)).child(model_card)),
             ),
     )
 }

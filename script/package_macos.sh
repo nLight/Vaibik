@@ -75,6 +75,28 @@ verify_signer() {
   [[ "$actual" == "$identity" ]] || fail "Unexpected signing identity in $1."
 }
 
+notarize() {
+  local dmg=$1 arch=$2
+  local receipt="$stage/notary-$arch-${dmg##*/}.json"
+  local submit_status=0 status submission_id
+  xcrun notarytool submit "$dmg" "${notary_args[@]}" --wait --timeout 30m --output-format json > "$receipt" || submit_status=$?
+  status=$(/usr/bin/plutil -extract status raw -o - "$receipt" 2>/dev/null || true)
+  if [[ "$submit_status" != 0 || "$status" != Accepted ]]; then
+    cat "$receipt" >&2
+    if [[ "$status" == Invalid || "$status" == Rejected ]]; then
+      if submission_id=$(/usr/bin/plutil -extract id raw -o - "$receipt" 2>/dev/null); then
+        xcrun notarytool log "$submission_id" "${notary_args[@]}" >&2 || true
+      fi
+    fi
+    fail 'The notarization request failed.'
+  fi
+  cat "$receipt"
+  xcrun stapler staple "$dmg"
+  xcrun stapler validate "$dmg"
+  /usr/bin/codesign --verify --strict "$dmg"
+  spctl --assess --verbose=2 --type open --context context:primary-signature "$dmg"
+}
+
 version=$(node -p 'require("./desktop/package.json").version')
 for arch in "${architectures[@]}"; do
   case "$arch" in
@@ -131,26 +153,35 @@ for arch in "${architectures[@]}"; do
     /usr/bin/codesign --verify --strict "$dmg"
     verify_signer "$dmg"
   fi
-  if "$distribution"; then
-    receipt="$stage/notary-$arch.json"
-    submit_status=0
-    xcrun notarytool submit "$dmg" "${notary_args[@]}" --wait --timeout 30m --output-format json > "$receipt" || submit_status=$?
-    status=$(/usr/bin/plutil -extract status raw -o - "$receipt" 2>/dev/null || true)
-    if [[ "$submit_status" != 0 || "$status" != Accepted ]]; then
-      cat "$receipt" >&2
-      if [[ "$status" == Invalid || "$status" == Rejected ]]; then
-        if submission_id=$(/usr/bin/plutil -extract id raw -o - "$receipt" 2>/dev/null); then
-          xcrun notarytool log "$submission_id" "${notary_args[@]}" >&2 || true
-        fi
-      fi
-      fail 'The notarization request failed.'
-    fi
-    cat "$receipt"
-    xcrun stapler staple "$dmg"
-    xcrun stapler validate "$dmg"
-    /usr/bin/codesign --verify --strict "$dmg"
-    spctl --assess --verbose=2 --type open --context context:primary-signature "$dmg"
-  fi
+  if "$distribution"; then notarize "$dmg" "$arch"; fi
   mv -f -- "$dmg" "$destination/"
   printf 'Verified %s/%s\n' "$destination" "${dmg##*/}"
+
+  # VibeMic Console (GPUI) reuses the engine staged above for this architecture.
+  console="$stage/VibeMic-Console-$version-$arch.dmg"
+  ./script/package_console_macos.sh "$arch" "$identity" "$console"
+  hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mount" "$console"
+  mounted=true
+  app="$mount/VibeMic Console.app"
+  contents="$app/Contents"
+  packed="$contents/Resources/vibemic"
+  /usr/bin/codesign --verify --deep --strict "$app"
+  verify_signer "$app"
+  [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$contents/Info.plist") == "$version" ]] \
+    || fail "Unexpected version in $app."
+  for binary in "$contents/MacOS/vibemic-gpui" "$packed/engine/nemo/bin/nemo-speech" \
+      "$packed/engine/vibemic-desktop-draft"; do
+    [[ $(lipo -archs "$binary") == "$expected" ]] || fail "Unexpected architecture in $binary."
+    /usr/bin/codesign --verify --strict "$binary"
+    verify_signer "$binary"
+  done
+  hdiutil detach "$mount" -quiet
+  mounted=false
+  if "$signed"; then
+    /usr/bin/codesign --verify --strict "$console"
+    verify_signer "$console"
+  fi
+  if "$distribution"; then notarize "$console" "$arch"; fi
+  mv -f -- "$console" "$destination/"
+  printf 'Verified %s/%s\n' "$destination" "${console##*/}"
 done

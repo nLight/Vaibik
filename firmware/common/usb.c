@@ -238,11 +238,6 @@ static const struct hid_device_ops shortcut_ops = {
 	.input_report_done = shortcut_done,
 };
 
-bool vm_usb_shortcut_requested(void)
-{
-	return atomic_get(&shortcut_requested) && atomic_get(&key_state);
-}
-
 void vm_usb_shortcut_tick(void)
 {
 	if (!VENDOR_HID || !atomic_get(&shortcut_ready)) {

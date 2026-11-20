@@ -250,7 +250,10 @@ void vm_session_tick(uint32_t now)
 		waiting.expired = true;
 	}
 	if (phase != IDLE && end_reason == VM_END_NONE && now - received_at >= LINK_TIMEOUT_MS) {
-		close_session(VM_END_RADIO_TIMEOUT);
+		/* Treat a lost link like a release after the last received block. The host may
+		 * still be behind (it opened the mic late), so drain what already arrived.
+		 */
+		end_audio(audio.head, VM_END_RADIO_TIMEOUT);
 	}
 	if ((phase == PLAY || phase == TAIL) && !stream) {
 		if (end_reason == VM_END_NONE) {
@@ -263,8 +266,11 @@ void vm_session_tick(uint32_t now)
 			close_session(VM_END_USB_STOPPED);
 		}
 	}
+	/* After release keep the key, and any native-dictation shortcut it holds, until the
+	 * host opens the microphone: Codex and Claude often need longer than a short phrase.
+	 */
 	if (phase == WAIT_FOR_HOST && end_reason != VM_END_NONE && !stream &&
-	    (played || vm_usb_shortcut_requested() || end_reason == VM_END_SUPERSEDED ||
+	    (played || end_reason == VM_END_SUPERSEDED ||
 	     now - opened_at >= SHORT_PRESS_AUDIO_GRACE_MS)) {
 		close_session(played ? VM_END_USB_STOPPED : VM_END_HOST_TIMEOUT);
 	}

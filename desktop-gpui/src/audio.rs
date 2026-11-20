@@ -42,6 +42,7 @@ fn pick_input(host: &cpal::Host) -> Option<cpal::Device> {
 }
 
 pub struct Recorder {
+    name: String,
     stream: cpal::Stream,
     buffer: Arc<Mutex<Vec<f32>>>,
     rate: u32,
@@ -52,6 +53,7 @@ impl Recorder {
     pub fn start() -> Result<Self, String> {
         let host = cpal::default_host();
         let device = pick_input(&host).ok_or("Микрофон не найден.")?;
+        let name = device.name().unwrap_or_default();
         let supported = device.default_input_config().map_err(|error| error.to_string())?;
         let rate = supported.sample_rate().0;
         let channels = supported.channels();
@@ -81,7 +83,11 @@ impl Recorder {
             format => return Err(format!("Неподдерживаемый формат микрофона: {format:?}")),
         };
         stream.play().map_err(|error| error.to_string())?;
-        Ok(Self { stream, buffer, rate, channels })
+        Ok(Self { name, stream, buffer, rate, channels })
+    }
+
+    pub fn device(&self) -> &str {
+        &self.name
     }
 
     pub fn stop(self) -> Result<Vec<u8>, String> {
