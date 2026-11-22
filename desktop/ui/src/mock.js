@@ -1,15 +1,12 @@
 // Browser-only fixture mirroring the Rust `--fixture` backend, so the UI can be
 // exercised end-to-end without native hardware. Never used inside Tauri.
 const VERSION = '0.1.34';
-const BANNER = '\x1b[?2004hCodex · тестовая сессия\r\nПроект: vibemic-demo\r\n\r\n> ';
 
 function defaultSettings() {
     return {
         model: 'parakeet', language: 'auto', dictationMode: 'local',
         codexDictationShortcut: false, claudeDictationShortcut: false,
-        uiLanguage: 'ru', microphone: '', agent: 'codex',
-        project: '/Volumes/Dev/VibeMic example', autoInsert: true, output: 'terminal',
-        pairCode: '', agentPaths: { codex: '', claude: '' }
+        uiLanguage: 'ru', microphone: '', pairCode: ''
     };
 }
 
@@ -36,7 +33,6 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export function createMockApi() {
     const settings = defaultSettings();
     const listeners = new Map();
-    let terminalId = null;
 
     const emit = (event, payload) => {
         for (const callback of [...(listeners.get(event) ?? [])]) callback(payload);
@@ -48,35 +44,26 @@ export function createMockApi() {
     };
     const merge = patch => {
         for (const [key, value] of Object.entries(patch)) {
-            if (key === 'agentPaths') settings.agentPaths = { ...settings.agentPaths, ...value };
-            else if (key in settings) settings[key] = value;
+            if (key in settings) settings[key] = value;
         }
-        return { ...settings, agentPaths: { ...settings.agentPaths } };
+        return { ...settings };
     };
 
     return {
         async init() {
             return {
-                settings: { ...settings, agentPaths: { ...settings.agentPaths } },
+                settings: { ...settings },
                 version: VERSION, platform: 'darwin', fixture: true, external: true, usbRule: null,
                 models: { parakeet: { installed: true, damaged: false, downloading: false } },
-                agents: { codex: { path: '/opt/vibemic-fixture/bin/codex', installing: false }, claude: { path: null, installing: false } },
                 runtime: true
             };
         },
         async save(patch) { return merge(patch); },
-        async chooseProject() { return merge({ project: '/Volumes/Dev/Пример проекта с длинным названием' }); },
         async exportProfile() { return true; },
         async importProfile() {
-            return { model: 'parakeet', language: 'auto', agent: 'codex', output: 'terminal', autoInsert: true, dictationMode: 'local', pairCode: '8B27-3DE4' };
+            return { model: 'parakeet', language: 'auto', dictationMode: 'local', pairCode: '8B27-3DE4' };
         },
         async applyProfile(profile) { return merge(profile); },
-        async agentStatus() {
-            return { codex: { path: '/opt/vibemic-fixture/bin/codex', installing: false }, claude: { path: null, installing: false } };
-        },
-        async openAgentDocs() {},
-        async chooseAgent() { return { ...settings, agentPaths: { ...settings.agentPaths } }; },
-        async installAgent() { throw new Error('В тестовом режиме установка отключена.'); },
         async modelStatus() { return { parakeet: { installed: true, damaged: false, downloading: false } }; },
         async installModel() { throw new Error('В тестовом режиме загрузка отключена.'); },
         async cancelModel() {},
@@ -99,15 +86,6 @@ export function createMockApi() {
         async flash(directory, role) { await delay(400); return { role, backupSaved: true }; },
         async firmwareBackups() {},
         async usbAccess() { return 'configured'; },
-        async startTerminal() { terminalId = 'fixture-terminal'; return terminalId; },
-        async terminalReady(id) { emit('terminal:data', { id, data: BANNER }); },
-        async stopTerminal(id) { terminalId = null; emit('terminal:exit', { id, exitCode: 0 }); },
-        async terminalInput(id, data) {
-            if (data.startsWith('\x1b[200~') && data.endsWith('\x1b[201~')) {
-                emit('terminal:data', { id, data: data.slice(6, -6) });
-            }
-        },
-        async terminalResize() {},
         async copy() {},
         async prepareExternal() { return 'fixture-draft'; },
         async pasteExternal() {},
@@ -131,9 +109,6 @@ export function createMockApi() {
         async pdmCancel() {},
         async uiReady() {},
         onModelProgress: subscriber('model:progress'),
-        onInstallLog: subscriber('agent:log'),
-        onTerminalData: subscriber('terminal:data'),
-        onTerminalExit: subscriber('terminal:exit'),
         onHidReport: subscriber('hid:report'),
         onHidConnection: subscriber('hid:connection'),
         onHidFeatureError: subscriber('hid:feature-error'),

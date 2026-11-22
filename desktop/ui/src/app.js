@@ -5,9 +5,6 @@ import { capturePdmProbe } from './pdm.js';
 import { api } from './api.js';
 import { icons, iconPaths } from './icons.js';
 import { sound } from './sound.js';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
 
 const localizeStatic = staticTranslations(document);
 const $ = selector => document.querySelector(selector);
@@ -19,7 +16,6 @@ function setIcon(element, name) {
     element.innerHTML = `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name] ?? ''}</svg>`;
 }
 
-const agentNames = { codex: 'Codex', claude: 'Claude Code' };
 const modelNames = { parakeet: 'Parakeet TDT v3' };
 const modelSizes = { parakeet: '714 МБ' };
 const linkEndMessages = {
@@ -29,8 +25,8 @@ const linkEndMessages = {
     superseded: 'Проверку прервало новое нажатие PTT.'
 };
 const state = {
-    settings: null, models: {}, agents: {}, fixture: false, hid: false,
-    page: 'overview', recording: null, processing: null, waiting: null, progress: {}, volumes: [], inputs: [], terminal: null,
+    settings: null, models: {}, fixture: false, hid: false,
+    page: 'overview', recording: null, processing: null, waiting: null, progress: {}, volumes: [], inputs: [],
     pttTransport: undefined, battery: null
 };
 const fixtureInputs = [
@@ -52,6 +48,7 @@ let transferringProfile = false;
 let nextTakeId = 0;
 let drafts = [];
 let selectedDraft;
+let dictationLog = [];
 
 function errorDetail(message) {
     return t(String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''));
@@ -97,9 +94,6 @@ function go(page) {
     $('#scroll-area').scrollTop = 0;
     if (changed) sound.play('nav');
     (inSettings ? $(`[data-section="${page}"]`) : $('#open-settings')).focus({ preventScroll: true });
-    if (page === 'agents' && state.terminal) requestAnimationFrame(() => {
-        if (state.page === 'agents') state.terminal?.fit.fit();
-    });
 }
 
 async function save(patch) {
@@ -115,8 +109,6 @@ function applyUiLanguage() {
     setLanguage(state.settings.uiLanguage);
     localizeStatic();
     $('#ui-language').value = state.settings.uiLanguage;
-    for (const draft of drafts) draft.status = t(draft.status);
-    $('#draft-state').textContent = t($('#draft-state').textContent);
     $('#notification-text').textContent = t($('#notification-text').textContent);
     for (const [index, option] of [...$('#draft-select').options].entries()) {
         option.textContent = index === drafts.length - 1 ? t('Последняя фраза') : t('Предыдущая фраза');
@@ -125,6 +117,7 @@ function applyUiLanguage() {
     updateMicrophones();
     render();
     renderSound();
+    renderLog();
 }
 
 function selectedInput() {
@@ -166,7 +159,6 @@ function render() {
     renderBattery();
     const deviceStatus = state.pttTransport === 'usb' ? t('Микрофон подключён по USB') : t('Донгл подключён');
     const model = state.models[state.settings.model];
-    const output = state.settings.output;
     const input = selectedInput();
     const status = state.recording ? 'recording' : state.processing ? 'processing' : 'idle';
     const guide = status === 'idle' ? recordingGuide(input, model) : null;
@@ -195,7 +187,6 @@ function render() {
     const setup = Boolean(guide) || !model?.installed;
     manual.hidden = setup;
     manual.disabled = Boolean(state.waiting || linkCheck || pdmProbe || !input);
-    $('#output-segmented').hidden = Boolean(guide);
     $('#guide-next').hidden = !guide;
     if (guide) {
         $('#guide-next').textContent = guide.action;
@@ -205,12 +196,6 @@ function render() {
     $('#ready-device').textContent = !device ? t('Подключите передатчик по USB или используйте донгл.')
         : standby?.input?.ready || (state.fixture && !standby) || (state.settings.dictationMode === 'auto' && input) ? t('Готов к записи')
             : standby ? t('Подготовка аудиовхода') : t('Проверьте аудиовход');
-    const desktopOutput = state.platform === 'darwin' ? t('Активное приложение') : t('Открытый Claude или Codex');
-    $('#output option[value=desktop]').textContent = desktopOutput;
-    $$('#output-segmented button').forEach(button => {
-        button.setAttribute('aria-pressed', String(button.dataset.output === output));
-        button.disabled = button.dataset.output === 'desktop' && !state.external;
-    });
     $('#connect-hid-label').textContent = device ? deviceStatus : t('Подключить VibeMic');
     $('#connect-hid').disabled = device;
     renderLinuxAccess();
@@ -227,47 +212,27 @@ function render() {
     $('#claude-dictation-shortcut').checked = state.settings.claudeDictationShortcut;
     $('#claude-dictation-shortcut').disabled = $('#dictation-mode').disabled;
     $('#claude-shortcut-hint').hidden = !state.settings.claudeDictationShortcut;
+    $('#external-permissions').hidden = state.platform !== 'darwin';
     $('#dictation-mode-hint').textContent = state.settings.dictationMode === 'auto'
-        ? t('В Codex и Claude включается встроенная диктовка, если она доступна. В остальных приложениях текст распознаёт Parakeet.')
-        : t('Parakeet распознаёт речь на этом компьютере и вставляет текст в выбранное место.');
-    $('#agent').value = state.settings.agent;
-    $('#output').value = output;
-    $('#auto-insert').checked = state.settings.autoInsert;
-    $('#auto-insert').disabled = output === 'manual';
-    $('#external-permissions').hidden = state.platform !== 'darwin' || output !== 'desktop';
-    $('#output-hint').textContent = {
-        terminal: t('Черновик попадёт в активную сессию встроенного терминала.'),
-        desktop: state.platform === 'darwin'
-            ? t('Поставьте курсор в нужное поле ввода и удерживайте кнопку на передатчике.')
-            : t('Во время записи оставьте курсор в поле ввода Claude или Codex.'),
-        manual: t('Текст останется в черновике, откуда его можно скопировать.')
-    }[output];
-    $('#project-path').textContent = state.settings.project;
-    $('#start-terminal').disabled = Boolean(state.terminal) || !state.agents[state.settings.agent]?.path;
-    $('#stop-terminal').hidden = !state.terminal;
+        ? t('В Codex и Claude включается встроенная диктовка, если она доступна. В остальных приложениях Parakeet распознаёт речь и вставляет текст под курсором.')
+        : t('Parakeet распознаёт речь на этом компьютере и вставляет текст под курсором в активном приложении.');
     updateProfileActions();
     updateDraft();
     updateModels();
-    updateAgents();
 }
 
 function updateDraft() {
-    const text = $('#draft-text').value;
-    const empty = !text.trim();
-    $('#draft-state').hidden = empty || !$('#draft-state').textContent;
-    $('.draft-meta').hidden = $('#draft-state').hidden && $('#draft-select').hidden;
+    const empty = !$('#draft-text').value.trim();
+    $('.draft-meta').hidden = $('#draft-select').hidden;
     $('#copy-draft').disabled = empty;
-    $('#insert-draft').hidden = !state.terminal;
-    $('#insert-draft').disabled = empty || !state.terminal;
     const status = state.recording ? 'recording' : state.processing ? 'processing' : 'idle';
-    $('#standby').hidden = !empty || status !== 'idle';
+    $('#standby').hidden = dictationLog.length > 0 || status !== 'idle';
 }
 
 function rememberDraftEdits() {
     const draft = drafts.find(item => item.id === selectedDraft);
     if (draft) {
         draft.text = $('#draft-text').value;
-        draft.status = $('#draft-state').textContent;
     }
 }
 
@@ -275,14 +240,13 @@ function showDraft(draft) {
     selectedDraft = draft.id;
     $('#draft-select').value = String(draft.id);
     $('#draft-text').value = draft.text;
-    $('#draft-state').textContent = t(draft.status);
     updateDraft();
 }
 
-function publishDraft(take, text, status) {
+function publishDraft(take, text) {
     rememberDraftEdits();
     const previous = drafts.find(draft => draft.id === take.previousId);
-    const latest = { id: take.id, text, status };
+    const latest = { id: take.id, text };
     drafts = previous ? [previous, latest] : [latest];
     const select = $('#draft-select');
     select.replaceChildren(...drafts.map(draft => new Option(
@@ -293,6 +257,24 @@ function publishDraft(take, text, status) {
         updateDraft();
     } else showDraft(latest);
     sound.play('done');
+}
+
+function logDictation(entry) {
+    dictationLog = [...dictationLog.slice(-199), { at: new Date(), ...entry }];
+    renderLog();
+}
+
+function renderLog() {
+    const lines = $('#log-lines');
+    lines.replaceChildren(...dictationLog.map(entry => {
+        const line = document.createElement('div');
+        const time = document.createElement('span');
+        time.className = 'log-time';
+        time.textContent = `[${entry.at.toTimeString().slice(0, 8)}]`;
+        line.append(time, document.createTextNode(' ' + (entry.native ? t`Встроенная диктовка · ${entry.native}` : entry.text)));
+        return line;
+    }));
+    lines.scrollTop = lines.scrollHeight;
 }
 
 function renderLinuxAccess() {
@@ -360,32 +342,6 @@ function updateModels() {
     }
 }
 
-function updateAgents() {
-    for (const id of Object.keys(agentNames)) {
-        let card = $(`[data-agent="${id}"]`);
-        if (!card) {
-            card = document.createElement('article');
-            card.className = 'card agent-card';
-            card.dataset.agent = id;
-            card.innerHTML = '<span class="tag"></span><h2></h2><p class="path-text"></p><div class="actions"></div>';
-            $('#agent-list').append(card);
-        }
-        const info = state.agents[id] || {};
-        card.querySelector('h2').textContent = agentNames[id];
-        card.querySelector('.tag').textContent = info.installing ? t('УСТАНОВКА') : info.path ? t('CLI НАЙДЕН') : t('НАСТРОЙКА');
-        card.querySelector('p').textContent = info.path || t('Установите официальный CLI или укажите путь.');
-        buttons(card, [
-            [t('Указать путь'), false, async () => {
-                state.settings = await api.chooseAgent(id);
-                state.agents = await api.agentStatus();
-                render();
-            }, info.installing],
-            [info.installing ? t('Устанавливается…') : info.path ? t('Инструкция') : t('Установить'), !info.path,
-                info.path ? () => api.openAgentDocs(id) : () => installAgent(id), info.installing]
-        ]);
-    }
-}
-
 async function downloadModel(id, select = true) {
     if (state.models[id]?.downloading) return;
     state.models[id] = { ...state.models[id], downloading: true };
@@ -450,20 +406,14 @@ async function transferProfile(action) {
 async function importProfile() {
     const profile = await api.importProfile();
     if (!profile) return;
-    const fallback = profile.output === 'desktop' && !state.external;
-    const output = fallback ? 'manual' : profile.output;
     const label = (selector, value) => [...$(selector).options].find(option => option.value === value).textContent;
     const details = [
         [t('Код радиопары'), profile.pairCode || t('Стендовый адрес')],
         [t('Модель'), modelNames[profile.model]],
         [t('Режим диктовки'), label('#dictation-mode', profile.dictationMode)],
-        [t('Язык'), label('#language', profile.language)],
-        [t('Агент'), agentNames[profile.agent]],
-        [t('Место вставки'), label('#output', output)],
-        [t('Автовставка'), output !== 'manual' && profile.autoInsert ? t('Включена') : t('Выключена')]
+        [t('Язык'), label('#language', profile.language)]
     ];
-    const body = fallback ? t('В этой сборке доступен черновик в VibeMic. Код пары сохранится для будущих прошивок.')
-        : t('Эти значения заменят текущие. Код пары сохранится для будущих прошивок.');
+    const body = t('Эти значения заменят текущие. Код пары сохранится для будущих прошивок.');
     if (!await confirm(t('ПРОФИЛЬ'), t('Применить настройки?'), body, t('Применить профиль'), details)) return;
     if (profileImportBlocked()) throw new Error(t('Завершите запись и распознавание перед импортом.'));
     state.settings = await api.applyProfile(profile);
@@ -472,25 +422,6 @@ async function importProfile() {
     updateSelectedVolume();
     render();
     notify(t('Профиль применён.'));
-}
-
-async function installAgent(id) {
-    if (!await confirm('CLI', t`Установить ${agentNames[id]}?`,
-        t('VibeMic запустит официальный установщик. После установки вход в аккаунт откроется в терминале агента.'),
-        t('Запустить установщик'))) return;
-    state.agents[id] = { ...state.agents[id], installing: true };
-    $('#install-output').textContent = '';
-    $('#install-log').hidden = false;
-    $('#install-log').open = true;
-    render();
-    try {
-        await api.installAgent(id);
-        await save({ agent: id });
-        notify(t('CLI установлен. Откройте терминал для входа.'));
-    } finally {
-        state.agents = await api.agentStatus();
-        render();
-    }
 }
 
 function updateVolumes() {
@@ -886,9 +817,9 @@ function begin(trigger) {
         previousId,
         model: state.settings.model,
         language: state.settings.language,
-        trigger, terminal: state.settings.output === 'terminal' ? state.terminal?.id : null,
+        trigger,
         automatic,
-        insertExternal: !state.processing && trigger === 'hardware' && state.settings.output === 'desktop' && state.settings.autoInsert
+        insertExternal: !state.processing && trigger === 'hardware' && state.external
     };
     take.pending = captureTake(take, selected, input);
     state.recording = take;
@@ -1010,30 +941,23 @@ async function recognizeTake(take) {
         const { wave, error: captureError } = await take.wave;
         if (captureError) throw captureError;
         if (wave.native) {
+            logDictation({ native: wave.app });
             notify(t`Диктовка завершена в ${wave.app}. Проверьте текст в приложении.`);
             return;
         }
         const text = await api.transcribe(wave, take.model, take.language);
         if (!text) throw new Error(t('Речь не распознана.'));
-        const inserted = !take.previousId && state.settings.autoInsert && state.settings.output === 'terminal' &&
-            take.terminal && state.terminal?.id === take.terminal && pasteDraft(text);
-        let externalInserted = false;
-        if (take.external && state.settings.autoInsert && state.settings.output === 'desktop') {
+        logDictation({ text });
+        if (take.external) {
             const { id, error } = await take.external;
             try {
                 if (error) throw error;
                 await api.pasteExternal(id, text);
-                externalInserted = true;
             } catch (error) {
                 notify(t('Черновик сохранён в VibeMic. ') + errorDetail(error.message || error), true);
             }
         }
-        const status = inserted
-            ? t('Вставлено в поле ввода агента. Проверьте текст и отправьте его там.')
-            : externalInserted ? t('Вставлено в открытое приложение. Проверьте и отправьте текст там.')
-                : take.previousId ? t('Фраза сохранена для отдельной вставки.') : t('Готов к проверке и вставке.');
-        publishDraft(take, text, status);
-        if (inserted && state.page !== 'overview') notify(t('Черновик вставлен в терминал.'));
+        publishDraft(take, text);
     } catch (error) {
         state.models = await api.modelStatus().catch(() => state.models);
         notify(error.message || String(error), true);
@@ -1047,44 +971,6 @@ async function recognizeTake(take) {
             render();
         }
     }
-}
-
-function pasteDraft(value = $('#draft-text').value) {
-    const text = value.trim().replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
-    const active = state.terminal;
-    if (!active || !text || !active.view.modes.bracketedPasteMode) return false;
-    active.view.paste(text);
-    return true;
-}
-
-async function openTerminal() {
-    const agent = state.settings.agent;
-    const id = await api.startTerminal(agent);
-    go('agents');
-    $('#terminal-wrap').hidden = false;
-    const view = new Terminal({
-        fontSize: 12.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-        cursorBlink: true, lineHeight: 1.2,
-        theme: { background: '#08090b', foreground: '#eef1f4', cursor: '#ff4d00', cursorAccent: '#08090b', selectionBackground: 'rgba(255,77,0,0.3)' }
-    });
-    const fit = new FitAddon();
-    view.loadAddon(fit);
-    view.open($('#terminal'));
-    state.terminal = { id, agent, view, fit };
-    view.onData(data => api.terminalInput(id, data));
-    view.onResize(({ cols, rows }) => api.terminalResize(id, cols, rows));
-    fit.fit();
-    view.focus();
-    await api.terminalReady(id);
-    render();
-    $('#terminal-wrap').scrollIntoView({ block: 'nearest' });
-}
-
-function closeTerminal() {
-    state.terminal?.view.dispose();
-    state.terminal = null;
-    $('#terminal-wrap').hidden = true;
-    render();
 }
 
 function renderSound() {
@@ -1103,9 +989,6 @@ document.addEventListener('pointerdown', () => sound.unlock(), { once: true });
 
 $$('[data-page], [data-section]').forEach(button => {
     button.addEventListener('click', () => go(button.dataset.page ?? button.dataset.section));
-});
-$$('#output-segmented button').forEach(button => {
-    button.addEventListener('click', () => { sound.play('toggle'); save({ output: button.dataset.output }); });
 });
 window.addEventListener('keydown', event => {
     if (!(event.metaKey || event.ctrlKey) || event.code !== 'Comma' || $('dialog').open) return;
@@ -1129,14 +1012,6 @@ bind('#draft-select', event => {
     if (draft) showDraft(draft);
 }, 'change');
 bind('#copy-draft', async () => { await api.copy($('#draft-text').value); sound.play('copy'); notify(t('Черновик скопирован.')); });
-bind('#insert-draft', () => {
-    if (!pasteDraft()) throw new Error(t('Агент ещё не готов принять вставку. Можно скопировать черновик.'));
-    $('#draft-state').textContent = t('Вставлено в поле ввода агента.');
-    updateDraft();
-    go('agents');
-    state.terminal?.view.focus();
-    $('#terminal-wrap').scrollIntoView({ block: 'nearest' });
-});
 bind('#connect-hid', connectHid);
 bind('#link-check-toggle', () => linkCheck ? stopLinkCheck(t('Проверка отменена.')) : startLinkCheck());
 bind('#pdm-record', () => pdmProbe ? pdmProbe.abort() : startPdmProbe());
@@ -1209,22 +1084,10 @@ bind('#ui-language', event => save({ uiLanguage: event.target.value }), 'change'
 bind('#dictation-mode', event => { sound.play('toggle'); save({ dictationMode: event.target.value }); }, 'change');
 bind('#codex-dictation-shortcut', event => { sound.play('toggle'); save({ codexDictationShortcut: event.target.checked }); }, 'change');
 bind('#claude-dictation-shortcut', event => { sound.play('toggle'); save({ claudeDictationShortcut: event.target.checked }); }, 'change');
-bind('#choose-project', async () => { state.settings = await api.chooseProject(); render(); });
-bind('#agent', event => save({ agent: event.target.value }), 'change');
-bind('#output', event => save({ output: event.target.value }), 'change');
 bind('#external-permissions', async () => {
     const granted = await api.permissions();
     notify(granted ? t('VibeMic может вставлять текст в активное окно.')
         : t('Разрешите VibeMic доступ в настройках универсального доступа macOS.'));
-});
-bind('#auto-insert', event => { sound.play('toggle'); save({ autoInsert: event.target.checked }); }, 'change');
-bind('#start-terminal', openTerminal);
-bind('#stop-terminal', async () => {
-    if (!state.terminal) return;
-    if (!await confirm(t('СЕССИЯ'), t('Завершить сессию агента?'),
-        t('Запущенный процесс в терминале VibeMic будет остановлен.'), t('Завершить сессию'))) return;
-    await api.stopTerminal(state.terminal.id);
-    closeTerminal();
 });
 
 const manual = $('#manual-ptt');
@@ -1254,22 +1117,6 @@ api.onModelProgress(({ id, received, total }) => {
     const progress = $(`[data-model="${id}"] progress`);
     if (progress) progress.value = state.progress[id];
 });
-api.onInstallLog(({ line }) => {
-    const log = $('#install-output');
-    log.textContent = (log.textContent + line).slice(-24000);
-    log.scrollTop = log.scrollHeight;
-});
-api.onTerminalData(({ id, data }) => {
-    if (state.terminal?.id === id) state.terminal.view.write(data);
-});
-api.onTerminalExit(({ id, exitCode }) => {
-    if (state.terminal?.id !== id) return;
-    closeTerminal();
-    notify(t`Сессия завершилась, код ${exitCode}.`);
-});
-window.addEventListener('resize', () => {
-    if (state.page === 'agents') state.terminal?.fit.fit();
-});
 
 try {
     const initial = await api.init();
@@ -1278,8 +1125,6 @@ try {
     $('.version').textContent = 'VibeMic ' + initial.version;
     $('#pair-code').value = state.settings.pairCode;
     applyUiLanguage();
-    $('#output option[value=desktop]').disabled = !initial.external;
-    if (!initial.external && state.settings.output === 'desktop') await save({ output: 'manual' });
     render();
     await refreshVolumes();
     await refreshMics().catch(() => {});
@@ -1304,7 +1149,7 @@ try {
         window.fixture = {
             go, connectHid, begin, release, handlePtt,
             updateBattery,
-            flash, openTerminal,
+            flash,
             setMicrophones(devices = fixtureInputs) {
                 reviewInputs = devices;
                 return refreshMics();
@@ -1326,16 +1171,6 @@ try {
             setCurrentAvailable(hasCurrent) {
                 state.volumes[0] = { ...state.volumes[0], hasCurrent };
                 updateVolumes();
-            },
-            terminalText() {
-                const buffer = state.terminal?.view.buffer.active;
-                let text = '';
-                for (let index = 0; index < (buffer?.length ?? 0); index++) {
-                    const line = buffer.getLine(index);
-                    if (index && !line.isWrapped) text += '\n';
-                    text += line.translateToString(!buffer.getLine(index + 1)?.isWrapped);
-                }
-                return text;
             },
             setModelStatus(id, status, progress = 0) {
                 state.models[id] = status;

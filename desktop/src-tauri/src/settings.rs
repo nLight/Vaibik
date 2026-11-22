@@ -1,31 +1,16 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::firmware::normalize_pair_code;
 
-pub const OUTPUTS: [&str; 3] = ["terminal", "desktop", "manual"];
 pub const DICTATION_MODES: [&str; 2] = ["local", "auto"];
-pub const AGENT_IDS: [&str; 2] = ["codex", "claude"];
 pub const MODEL_IDS: [&str; 1] = ["parakeet"];
 const PROFILE_FORMAT: &str = "vibemic-profile";
 const PROFILE_VERSION: u64 = 1;
 const PROFILE_LIMIT: u64 = 16 * 1024;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentPaths {
-    pub codex: String,
-    pub claude: String,
-}
-
-impl Default for AgentPaths {
-    fn default() -> Self {
-        Self { codex: String::new(), claude: String::new() }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,12 +22,7 @@ pub struct Settings {
     pub claude_dictation_shortcut: bool,
     pub ui_language: String,
     pub microphone: String,
-    pub agent: String,
-    pub project: String,
-    pub auto_insert: bool,
-    pub output: String,
     pub pair_code: String,
-    pub agent_paths: AgentPaths,
 }
 
 pub fn locale_language() -> String {
@@ -50,7 +30,7 @@ pub fn locale_language() -> String {
     if locale.starts_with("ru") { "ru".into() } else { "en".into() }
 }
 
-pub fn defaults(home: &Path) -> Settings {
+pub fn defaults() -> Settings {
     Settings {
         model: "parakeet".into(),
         language: "auto".into(),
@@ -59,12 +39,7 @@ pub fn defaults(home: &Path) -> Settings {
         claude_dictation_shortcut: false,
         ui_language: locale_language(),
         microphone: String::new(),
-        agent: "codex".into(),
-        project: home.to_string_lossy().to_string(),
-        auto_insert: true,
-        output: "terminal".into(),
         pair_code: String::new(),
-        agent_paths: AgentPaths::default(),
     }
 }
 
@@ -81,13 +56,6 @@ pub fn valid_settings(value: &Value, initial: &Settings) -> Settings {
     let dictation_mode = string_field(value, "dictationMode")
         .filter(|mode| darwin && DICTATION_MODES.contains(&mode.as_str()));
     let ui_language = string_field(value, "uiLanguage").filter(|lang| lang == "ru" || lang == "en");
-    let agent = string_field(value, "agent").filter(|agent| AGENT_IDS.contains(&agent.as_str()));
-    let project = string_field(value, "project").filter(|project| Path::new(project).is_absolute());
-    let output = string_field(value, "output").filter(|output| OUTPUTS.contains(&output.as_str()));
-    let agent_paths = AgentPaths {
-        codex: agent_path(value, "codex"),
-        claude: agent_path(value, "claude"),
-    };
     Settings {
         model: model.unwrap_or_else(|| initial.model.clone()),
         language: "auto".into(),
@@ -96,32 +64,14 @@ pub fn valid_settings(value: &Value, initial: &Settings) -> Settings {
         claude_dictation_shortcut: darwin && value.get("claudeDictationShortcut").and_then(Value::as_bool).unwrap_or(false),
         ui_language: ui_language.unwrap_or_else(|| initial.ui_language.clone()),
         microphone: string_field(value, "microphone").map(|mic| mic.chars().take(1024).collect()).unwrap_or_default(),
-        agent: agent.unwrap_or_else(|| initial.agent.clone()),
-        project: project.unwrap_or_else(|| initial.project.clone()),
-        auto_insert: value.get("autoInsert").and_then(Value::as_bool).unwrap_or(initial.auto_insert),
-        output: output.unwrap_or_else(|| initial.output.clone()),
         pair_code,
-        agent_paths,
     }
 }
 
-fn agent_path(value: &Value, id: &str) -> String {
-    value
-        .get("agentPaths")
-        .and_then(|paths| paths.get(id))
-        .and_then(Value::as_str)
-        .filter(|file| Path::new(file).is_absolute())
-        .unwrap_or_default()
-        .to_string()
-}
-
-pub fn load(config_path: &Path, home: &Path, fixture: bool) -> Settings {
-    let initial = defaults(home);
+pub fn load(config_path: &Path, fixture: bool) -> Settings {
+    let initial = defaults();
     if fixture {
-        return valid_settings(
-            &serde_json::json!({ "project": "/Volumes/Dev/VibeMic example", "uiLanguage": "ru" }),
-            &initial,
-        );
+        return valid_settings(&serde_json::json!({ "uiLanguage": "ru" }), &initial);
     }
     let saved = fs::read_to_string(config_path)
         .ok()
@@ -157,17 +107,12 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 pub fn portable_settings(value: &Value) -> Result<Value, String> {
     let model = value.get("model").and_then(Value::as_str).unwrap_or_default();
-    let agent = value.get("agent").and_then(Value::as_str).unwrap_or_default();
     let language = value.get("language").and_then(Value::as_str).unwrap_or_default();
-    let output = value.get("output").and_then(Value::as_str).unwrap_or_default();
     let dictation_mode = value.get("dictationMode").and_then(Value::as_str);
     let model_ok = MODEL_IDS.contains(&model) || model == "base" || model == "small";
     let languages = ["auto", "ru", "en", "de"];
     if !model_ok
-        || !AGENT_IDS.contains(&agent)
         || !languages.contains(&language)
-        || !OUTPUTS.contains(&output)
-        || !value.get("autoInsert").map(Value::is_boolean).unwrap_or(false)
         || !value.get("pairCode").map(Value::is_string).unwrap_or(false)
         || dictation_mode.map(|mode| !DICTATION_MODES.contains(&mode)).unwrap_or(false)
     {
@@ -177,9 +122,6 @@ pub fn portable_settings(value: &Value) -> Result<Value, String> {
     Ok(serde_json::json!({
         "model": "parakeet",
         "language": "auto",
-        "agent": agent,
-        "output": output,
-        "autoInsert": value["autoInsert"],
         "dictationMode": dictation_mode.unwrap_or("local"),
         "pairCode": pair_code,
     }))
@@ -251,42 +193,50 @@ pub fn write_profile(file: &Path, settings: &Settings, config_path: &Path) -> Re
     outcome.map_err(|_| "Не удалось сохранить файл профиля. Проверьте доступ к выбранной папке.".to_string())
 }
 
-pub fn profile_path(home: &Path) -> PathBuf {
-    home.join("VibeMic-profile.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn profile_round_trip() {
-        let settings = defaults(Path::new("/home/test"));
+        let settings = defaults();
         let portable = portable_settings(&serde_json::to_value(&settings).unwrap()).unwrap();
         assert_eq!(portable["model"], "parakeet");
         assert_eq!(portable["language"], "auto");
         let document = serde_json::json!({ "format": PROFILE_FORMAT, "version": 1, "settings": portable });
         let parsed = parse_profile(&document.to_string()).unwrap();
-        assert_eq!(parsed["agent"], "codex");
+        assert_eq!(parsed["dictationMode"], "local");
         assert!(parse_profile("{}").is_err());
         assert!(parse_profile("not json").is_err());
     }
 
     #[test]
+    fn legacy_profile_import() {
+        let legacy = serde_json::json!({
+            "format": PROFILE_FORMAT, "version": 1,
+            "settings": {
+                "model": "parakeet", "language": "auto", "agent": "codex", "output": "terminal",
+                "autoInsert": true, "dictationMode": "auto", "pairCode": "8B27-3DE4"
+            }
+        });
+        let parsed = parse_profile(&legacy.to_string()).unwrap();
+        assert_eq!(parsed["dictationMode"], "auto");
+        assert_eq!(parsed["pairCode"], "8B27-3DE4");
+        assert!(parsed.get("output").is_none());
+    }
+
+    #[test]
     fn settings_validation() {
-        let initial = defaults(Path::new("/home/test"));
+        let initial = defaults();
         let value = serde_json::json!({
-            "model": "whisper", "agent": "unknown", "output": "nowhere",
+            "model": "whisper", "output": "nowhere",
             "dictationMode": "auto", "uiLanguage": "fr", "pairCode": "8b27-3de4",
             "microphone": "mic-1", "autoInsert": false
         });
         let valid = valid_settings(&value, &initial);
         assert_eq!(valid.model, "parakeet");
-        assert_eq!(valid.agent, "codex");
-        assert_eq!(valid.output, "terminal");
         assert_eq!(valid.ui_language, initial.ui_language);
         assert_eq!(valid.pair_code, "8B27-3DE4");
-        assert!(!valid.auto_insert);
         assert_eq!(valid.dictation_mode, if cfg!(target_os = "macos") { "auto" } else { "local" });
     }
 }

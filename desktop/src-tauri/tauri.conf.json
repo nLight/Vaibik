@@ -45,7 +45,7 @@
     },
     "category": "DeveloperTool",
     "shortDescription": "Push-to-talk voice console for Codex and Claude Code",
-    "longDescription": "VibeMic is the desktop companion for the Vaibik push-to-talk microphone: local Parakeet transcription, agent terminal and firmware flashing.",
+    "longDescription": "VibeMic is the desktop companion for the Vaibik push-to-talk microphone: local Parakeet transcription, insertion at the cursor and firmware flashing.",
     "macOS": {
       "minimumSystemVersion": "13.3",
       "entitlements": "../assets/entitlements.mac.plist",

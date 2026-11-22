@@ -15,9 +15,9 @@ test('translation preserves interpolated values and supports stored UI messages'
     const { t, setLanguage, translate } = await import('../ui/src/i18n.mjs');
     setLanguage('en');
     assert.equal(t`Разметка S140 v${7} · приложение 0x${'27000'}.`, 'S140 v7 layout · application at 0x27000.');
-    assert.equal(t`Установить ${'Код с кириллицей'}?`, 'Install Код с кириллицей?');
+    assert.equal(t`Диктовка в ${'Код с кириллицей'}`, 'Dictating in Код с кириллицей');
     assert.equal(translate('Сервер моделей ответил 503.', 'en'), 'The model server returned 503.');
-    assert.equal(translate('Session ended with code 2.', 'ru'), 'Сессия завершилась, код 2.');
+    assert.equal(translate('Battery ≈ 80%', 'ru'), 'Батарея ≈ 80%');
     assert.equal(translate('Пользовательский текст /my/project', 'en'), 'Пользовательский текст /my/project');
     setLanguage('ru');
     assert.equal(t('Choose a microphone'), 'Выберите микрофон');

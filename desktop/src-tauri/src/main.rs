@@ -1,20 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod agents;
 mod bridge;
 mod commands;
 mod firmware;
 mod hid;
 mod macos;
 mod models;
-mod pty;
 mod serial;
 mod settings;
 mod state;
 mod tray;
 mod usb_access;
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -49,10 +46,6 @@ fn main() {
             } else {
                 app.path().resource_dir()?.join("vibemic")
             };
-            let home = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("/"));
             let scratch = std::env::temp_dir();
             let config_dir = if fixture {
                 scratch.join(format!("vibemic-fixture-{}", std::process::id()))
@@ -62,7 +55,7 @@ fn main() {
             std::fs::create_dir_all(&config_dir)?;
             let config_path = config_dir.join("settings.json");
             let firmware_backups = config_dir.join("firmware-backups");
-            let loaded = settings::load(&config_path, &home, fixture);
+            let loaded = settings::load(&config_path, fixture);
             let lang = loaded.ui_language.clone();
             let auto_dictation = loaded.dictation_mode == "auto";
             let runtime = resources.join("engine").join("nemo").join("bin").join(if cfg!(windows) { "nemo-speech.exe" } else { "nemo-speech" });
@@ -73,11 +66,9 @@ fn main() {
                 resources: resources.clone(),
                 scratch,
                 config_path,
-                home,
                 firmware_backups,
                 settings: Mutex::new(loaded),
                 models: models::ModelManager::new(config_dir.join("models"), runtime),
-                terminal: pty::Terminal::new(fixture),
                 external: bridge::ExternalDraft::new(resources.clone()),
                 approval: bridge::ApprovalGesture::new(helper.clone()),
                 native_dictation: bridge::NativeDictation::new(helper),
@@ -86,7 +77,6 @@ fn main() {
                 transcription: AtomicBool::new(false),
                 flashing: AtomicBool::new(false),
                 saving_pair: AtomicBool::new(false),
-                installing: Mutex::new(HashSet::new()),
                 write_lock: Mutex::new(()),
             });
             app.manage(state.clone());

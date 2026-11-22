@@ -32,7 +32,6 @@
     <!-- ===== Settings tabs ===== -->
     <nav class="settings-nav" aria-label="Разделы настроек" hidden>
         <button type="button" data-section="settings"><i data-icon="sliders"></i><span>Общие</span></button>
-        <button type="button" data-section="agents"><i data-icon="terminal"></i><span>Агенты</span></button>
         <button type="button" data-section="speech"><i data-icon="wave"></i><span>Распознавание</span></button>
         <button type="button" data-section="hardware"><i data-icon="cpu"></i><span>Платы</span></button>
     </nav>
@@ -63,9 +62,9 @@
                 </div>
                 <p id="capture-hint" hidden></p>
                 <div class="draft-screen">
-                    <textarea id="draft-text" rows="3" aria-label="Черновик задачи" spellcheck="false"></textarea>
+                    <textarea id="draft-text" rows="3" aria-label="Черновик задачи" spellcheck="false" hidden></textarea>
+                    <div id="log-lines" class="log-lines" role="log" aria-label="Журнал диктовки"></div>
                     <div class="draft-meta" hidden>
-                        <p id="draft-state" data-kind="info" hidden></p>
                         <select id="draft-select" class="dark" aria-label="Фраза в черновике" hidden></select>
                     </div>
                     <div id="standby" class="standby">
@@ -74,13 +73,7 @@
                 </div>
                 <div class="oled-controls">
                     <button id="manual-ptt" class="ptt-round" type="button" aria-label="Удерживать для пробной записи"><i data-icon="mic"></i></button>
-                    <div id="output-segmented" class="segmented dark" role="group" aria-label="Место вставки">
-                        <button type="button" data-output="terminal" aria-pressed="true" aria-label="Терминал"><i data-icon="terminal"></i><span>Терминал</span></button>
-                        <button type="button" data-output="desktop" aria-pressed="false" aria-label="Приложение"><i data-icon="corner"></i><span>Приложение</span></button>
-                        <button type="button" data-output="manual" aria-pressed="false" aria-label="Черновик"><i data-icon="copy"></i><span>Черновик</span></button>
-                    </div>
                     <button id="guide-next" class="primary" type="button" hidden></button>
-                    <button id="insert-draft" class="primary" type="button" hidden><i data-icon="terminal"></i><span>Вставить</span></button>
                     <button id="copy-draft" class="secondary ghost" type="button" disabled><i data-icon="copy"></i><span>Копировать</span></button>
                 </div>
             </div>
@@ -107,6 +100,9 @@
                     <label class="checkbox"><input id="claude-dictation-shortcut" type="checkbox"><span>Запускать диктовку Claude сочетанием ⌘D</span></label>
                     <p id="claude-shortcut-hint" class="inline-status" hidden>Обновите прошивку подключённой платы. В Claude Desktop откройте Settings → Desktop app → Dictation shortcut и выберите Command+D.</p>
                 </div>
+                <div class="field-row">
+                    <button id="external-permissions" class="secondary" type="button" hidden><i data-icon="lock"></i><span>Доступ к окну</span></button>
+                </div>
             </article>
 
             <article class="card setup">
@@ -126,7 +122,7 @@
                 <div class="section-head">
                     <div>
                         <h2>Профиль VibeMic</h2>
-                        <p>В JSON сохраняются код радиопары, режим диктовки, агент и настройки вставки.</p>
+                        <p>В JSON сохраняются код радиопары и режим диктовки.</p>
                     </div>
                 </div>
                 <div class="actions">
@@ -135,64 +131,6 @@
                 </div>
             </article>
             <p class="version"></p>
-        </section>
-
-        <!-- ================= AGENTS ================= -->
-        <section class="page" data-view="agents" hidden>
-            <article class="card setup">
-                <div class="section-head">
-                    <div>
-                        <h2>Куда вставлять черновик</h2>
-                        <p>Выберите, где проверять распознанный запрос.</p>
-                    </div>
-                </div>
-                <div class="field-row">
-                    <label>Агент
-                        <select id="agent">
-                            <option value="codex">Codex</option>
-                            <option value="claude">Claude Code</option>
-                        </select>
-                    </label>
-                    <label>Место вставки
-                        <select id="output">
-                            <option value="terminal">Терминал VibeMic</option>
-                            <option value="desktop">Активное приложение</option>
-                            <option value="manual">Черновик</option>
-                        </select>
-                    </label>
-                </div>
-                <p id="output-hint" class="inline-status"></p>
-                <div class="field-row">
-                    <label class="checkbox"><input id="auto-insert" type="checkbox"><span>Вставлять после PTT</span></label>
-                    <button id="external-permissions" class="secondary" type="button" hidden><i data-icon="lock"></i><span>Доступ к окну</span></button>
-                </div>
-            </article>
-
-            <article id="session-card" class="card setup">
-                <div class="section-head">
-                    <div>
-                        <h2>Сессия проекта</h2>
-                        <p id="project-path" class="path-text"></p>
-                    </div>
-                    <button id="choose-project" class="secondary" type="button"><i data-icon="folder"></i><span>Выбрать папку</span></button>
-                </div>
-                <div class="actions">
-                    <button id="stop-terminal" class="secondary" type="button" hidden><i data-icon="stop"></i><span>Завершить сессию</span></button>
-                    <button id="start-terminal" class="primary" type="button"><i data-icon="terminal"></i><span>Открыть терминал</span></button>
-                </div>
-                <div id="terminal-wrap" class="terminal-wrap" hidden><div id="terminal"></div></div>
-            </article>
-
-            <div class="subhead">
-                <h2>Агенты</h2>
-                <p>Запустите Codex или Claude Code в терминале VibeMic.</p>
-            </div>
-            <div id="agent-list" class="two-columns"></div>
-
-            <details id="install-log" class="install-log" hidden>
-                <summary>Журнал установки</summary>
-                <pre id="install-output"></pre>
-            </details>
         </section>
 
         <!-- ================= TRANSCRIPTION ================= -->
