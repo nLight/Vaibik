@@ -267,11 +267,24 @@ function logDictation(entry) {
 function renderLog() {
     const lines = $('#log-lines');
     lines.replaceChildren(...dictationLog.map(entry => {
-        const line = document.createElement('div');
         const time = document.createElement('span');
         time.className = 'log-time';
+        time.setAttribute('aria-hidden', 'true');
         time.textContent = `[${entry.at.toTimeString().slice(0, 8)}]`;
-        line.append(time, document.createTextNode(' ' + (entry.native ? t`Встроенная диктовка · ${entry.native}` : entry.text)));
+        const label = entry.native ? t`Встроенная диктовка · ${entry.native}` : entry.text;
+        const line = document.createElement(entry.native ? 'div' : 'button');
+        line.className = 'log-line';
+        line.append(time, document.createTextNode(' ' + label));
+        if (!entry.native) {
+            line.type = 'button';
+            line.title = t('Копировать фразу');
+            line.classList.add('copyable');
+            line.addEventListener('click', async () => {
+                await api.copy(entry.text);
+                sound.play('copy');
+                notify(t('Черновик скопирован.'));
+            });
+        }
         return line;
     }));
     lines.scrollTop = lines.scrollHeight;

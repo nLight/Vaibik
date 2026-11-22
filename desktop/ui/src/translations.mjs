@@ -214,6 +214,7 @@ export default {
     "Фраза в черновике": "Draft phrase",
     "Черновик задачи": "Task draft",
     "Копировать": "Copy",
+    "Копировать фразу": "Copy phrase",
     "Прошейте две платы Pro Micro nRF52840 и подключите донгл.": "Flash two Pro Micro nRF52840 boards and connect the dongle.",
     "Аудиовход": "Audio input",
     "Прошивка по USB": "USB firmware update",

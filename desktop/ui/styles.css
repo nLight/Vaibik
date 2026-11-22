@@ -198,7 +198,11 @@ main { position: relative; z-index: 1; display: flex; flex-direction: column; he
 .draft-screen { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-top: 12px; }
 #draft-text { display: none; }
 .log-lines { flex: 1 1 auto; min-height: 64px; max-height: 240px; overflow: auto; font: 11.5px/1.7 var(--mono); color: var(--oled-ink); overflow-wrap: anywhere; white-space: pre-wrap; }
-.log-time { color: var(--signal-hot); }
+.log-line { display: block; width: 100%; padding: 1px 4px; border: 0; background: none; font: inherit; color: inherit; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 4px; }
+.log-line.copyable { cursor: pointer; }
+.log-line.copyable:hover { background: rgba(255,255,255,.06); }
+.log-line.copyable:focus-visible { outline: 1px solid var(--signal); outline-offset: -1px; }
+.log-time { color: var(--signal-hot); user-select: none; }
 .draft-meta { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 
 /* Idle: a single quiet line, no emblem or readouts. */
