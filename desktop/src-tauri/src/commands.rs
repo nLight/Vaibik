@@ -5,13 +5,13 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tauri::ipc::{InvokeBody, Request, Response};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::settings::{self, Settings};
 use crate::state::AppState;
-use crate::{agents, firmware, macos, serial, tray, usb_access};
+use crate::{firmware, macos, serial, tray, usb_access};
 
 type Shared = Arc<AppState>;
 
@@ -69,24 +69,6 @@ fn persist(state: &AppState, app: &AppHandle, patch: Value) -> Result<Settings, 
     Ok(next)
 }
 
-fn agent_status(state: &AppState) -> Value {
-    let installing = state.installing.lock().unwrap();
-    let mut result = serde_json::Map::new();
-    for id in settings::AGENT_IDS {
-        let path = if state.fixture {
-            if id == "codex" { Some("/opt/vibemic-fixture/bin/codex".to_string()) } else { None }
-        } else {
-            let override_path = match id {
-                "codex" => state.settings.lock().unwrap().agent_paths.codex.clone(),
-                _ => state.settings.lock().unwrap().agent_paths.claude.clone(),
-            };
-            agents::find_agent(id, &override_path).ok().flatten()
-        };
-        result.insert(id.to_string(), json!({ "path": path, "installing": installing.contains(id) }));
-    }
-    Value::Object(result)
-}
-
 async fn pick_folder(app: AppHandle, title: &str, default: Option<PathBuf>) -> Option<PathBuf> {
     let title = title.to_string();
     tauri::async_runtime::spawn_blocking(move || {
@@ -135,7 +117,7 @@ async fn save_file(app: AppHandle, title: &str, name: &str, filter: (&str, &[&st
 }
 
 #[tauri::command]
-async fn app_init(app: AppHandle, state: State<'_, Shared>) -> Result<Value, String> {
+async fn app_init(state: State<'_, Shared>) -> Result<Value, String> {
     let settings = state.settings.lock().unwrap().clone();
     let usb_rule = if platform() != "linux" {
         Value::Null
@@ -158,7 +140,6 @@ async fn app_init(app: AppHandle, state: State<'_, Shared>) -> Result<Value, Str
         "external": state.external.supported(),
         "usbRule": usb_rule,
         "models": models,
-        "agents": agent_status(&state),
         "runtime": runtime,
     }))
 }
@@ -169,7 +150,7 @@ async fn settings_save(patch: Value, app: AppHandle, state: State<'_, Shared>) -
         return Err("Некорректные настройки.".into());
     };
     let allowed = [
-        "model", "language", "uiLanguage", "microphone", "agent", "autoInsert", "output",
+        "model", "language", "uiLanguage", "microphone",
         "dictationMode", "codexDictationShortcut", "claudeDictationShortcut",
     ];
     let filtered: serde_json::Map<String, Value> = object
@@ -178,18 +159,6 @@ async fn settings_save(patch: Value, app: AppHandle, state: State<'_, Shared>) -
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     persist(&state, &app, Value::Object(filtered))
-}
-
-#[tauri::command]
-async fn settings_project(app: AppHandle, state: State<'_, Shared>) -> Result<Settings, String> {
-    if state.fixture {
-        return persist(&state, &app, json!({ "project": "/Volumes/Dev/Пример проекта с длинным названием" }));
-    }
-    let default = PathBuf::from(state.settings.lock().unwrap().project.clone());
-    let Some(folder) = pick_folder(app.clone(), "Папка проекта", Some(default)).await else {
-        return Ok(state.settings.lock().unwrap().clone());
-    };
-    persist(&state, &app, json!({ "project": folder.to_string_lossy() }))
 }
 
 #[tauri::command]
@@ -223,72 +192,11 @@ async fn settings_apply_profile(profile: Value, app: AppHandle, state: State<'_,
     if state.flashing.load(Ordering::Relaxed) || state.saving_pair.load(Ordering::Relaxed) {
         return Err("Дождитесь окончания текущей операции с платой.".into());
     }
-    let mut patch = settings::portable_settings(&profile)?;
-    if patch.get("output").and_then(Value::as_str) == Some("desktop") && !state.external.supported() {
-        patch["output"] = json!("manual");
-    }
+    let patch = settings::portable_settings(&profile)?;
     state.saving_pair.store(true, Ordering::Relaxed);
     let result = persist(&state, &app, patch);
     state.saving_pair.store(false, Ordering::Relaxed);
     result.map_err(|_| "Не удалось применить профиль. Проверьте доступ к папке настроек.".to_string())
-}
-
-#[tauri::command]
-async fn agent_status_command(state: State<'_, Shared>) -> Result<Value, String> {
-    Ok(agent_status(&state))
-}
-
-#[tauri::command]
-async fn agent_docs(id: String) -> Result<(), String> {
-    let spec = agents::agent_spec(&id)?;
-    open_external(spec.docs)
-}
-
-#[tauri::command]
-async fn agent_choose(id: String, app: AppHandle, state: State<'_, Shared>) -> Result<Settings, String> {
-    agents::agent_spec(&id)?;
-    if state.fixture {
-        return Ok(state.settings.lock().unwrap().clone());
-    }
-    let Some(file) = pick_file(app.clone(), "Выберите исполняемый файл CLI", None).await else {
-        return Ok(state.settings.lock().unwrap().clone());
-    };
-    let executable = agents::find_agent(&id, &file.to_string_lossy())?
-        .ok_or_else(|| "Выбранный файл не запускается.".to_string())?;
-    let key = format!("agentPaths.{id}");
-    let _ = key;
-    let mut paths = serde_json::to_value(&state.settings.lock().unwrap().agent_paths).unwrap();
-    paths[&id] = json!(executable);
-    persist(&state, &app, json!({ "agentPaths": paths }))
-}
-
-#[tauri::command]
-async fn agent_install(id: String, app: AppHandle, state: State<'_, Shared>) -> Result<String, String> {
-    agents::agent_spec(&id)?;
-    {
-        let mut installing = state.installing.lock().unwrap();
-        if installing.contains(&id) {
-            return Err("Установщик уже запущен.".into());
-        }
-        installing.insert(id.clone());
-    }
-    let result = if state.fixture {
-        Err("В тестовом режиме установка отключена.".to_string())
-    } else {
-        let shared = state.inner().clone();
-        let log_app = app.clone();
-        let log_id = id.clone();
-        let install_id = id.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            agents::install_agent(&install_id, &shared.scratch, move |line| {
-                let _ = log_app.emit("agent:log", json!({ "id": log_id, "line": line }));
-            })
-        })
-        .await
-        .map_err(|error| error.to_string())?
-    };
-    state.installing.lock().unwrap().remove(&id);
-    result
 }
 
 #[tauri::command]
@@ -519,51 +427,6 @@ async fn device_linux_access(state: State<'_, Shared>) -> Result<Value, String> 
 }
 
 #[tauri::command]
-async fn terminal_start(agent: String, app: AppHandle, state: State<'_, Shared>) -> Result<String, String> {
-    agents::agent_spec(&agent)?;
-    let (project, override_path) = {
-        let settings = state.settings.lock().unwrap();
-        let override_path = if agent == "codex" { settings.agent_paths.codex.clone() } else { settings.agent_paths.claude.clone() };
-        (settings.project.clone(), override_path)
-    };
-    let executable = if state.fixture {
-        "fixture".to_string()
-    } else {
-        agents::find_agent(&agent, &override_path)?
-            .ok_or_else(|| "Сначала установите CLI или укажите путь к нему.".to_string())?
-    };
-    let shared = state.inner().clone();
-    let start_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || shared.terminal.start(&start_app, &agent, &project, &executable))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn terminal_ready(id: String, app: AppHandle, state: State<'_, Shared>) -> Result<(), String> {
-    state.terminal.ready(&app, &id);
-    Ok(())
-}
-
-#[tauri::command]
-async fn terminal_stop(id: String, state: State<'_, Shared>) -> Result<(), String> {
-    state.terminal.stop(&id);
-    Ok(())
-}
-
-#[tauri::command]
-async fn terminal_input(id: String, data: String, app: AppHandle, state: State<'_, Shared>) -> Result<(), String> {
-    state.terminal.input(&app, &id, &data);
-    Ok(())
-}
-
-#[tauri::command]
-async fn terminal_resize(id: String, cols: u16, rows: u16, state: State<'_, Shared>) -> Result<(), String> {
-    state.terminal.resize(&id, cols, rows);
-    Ok(())
-}
-
-#[tauri::command]
 async fn draft_copy(text: String, app: AppHandle, state: State<'_, Shared>) -> Result<(), String> {
     if text.len() > 160_000 {
         return Err("Некорректный черновик.".into());
@@ -715,14 +578,9 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sy
     tauri::generate_handler![
         app_init,
         settings_save,
-        settings_project,
         settings_export_profile,
         settings_import_profile,
         settings_apply_profile,
-        agent_status_command,
-        agent_docs,
-        agent_choose,
-        agent_install,
         model_status,
         model_install,
         model_cancel,
@@ -735,11 +593,6 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sy
         firmware_flash,
         firmware_backups,
         device_linux_access,
-        terminal_start,
-        terminal_ready,
-        terminal_stop,
-        terminal_input,
-        terminal_resize,
         draft_copy,
         draft_prepare_external,
         draft_paste_external,

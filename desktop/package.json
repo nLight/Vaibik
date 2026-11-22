@@ -16,9 +16,7 @@
     "dist": "tauri build"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.9.0",
-    "@xterm/addon-fit": "0.11.0",
-    "@xterm/xterm": "6.0.0"
+    "@tauri-apps/api": "^2.9.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0",
